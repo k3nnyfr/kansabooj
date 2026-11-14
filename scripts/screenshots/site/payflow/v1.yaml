@@ -1,0 +1,57 @@
+openapi: 3.0.3
+info: { title: PayFlow Checkout API, version: 2.4.0, description: API de paiement en ligne (données fictives). }
+servers: [{ url: https://api.payflow.example/v2 }]
+paths:
+  /payments:
+    post:
+      operationId: createPayment
+      summary: Créer un paiement
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PaymentRequest' } } }
+      responses:
+        "201": { description: Paiement créé, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+  /payments/{paymentId}:
+    get:
+      operationId: getPayment
+      summary: Consulter un paiement
+      parameters: [{ name: paymentId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Paiement, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+  /payments/{paymentId}/refunds:
+    post:
+      operationId: refundPayment
+      summary: Rembourser
+      parameters: [{ name: paymentId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { amount: { type: integer } } } } }
+      responses:
+        "201": { description: Remboursement créé }
+  /merchants/{merchantId}/reports:
+    get:
+      operationId: listReports
+      summary: Rapports de réconciliation
+      parameters: [{ name: merchantId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Rapports }
+components:
+  schemas:
+    PaymentRequest:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: integer }
+        currency: { type: string }
+        reference: { type: string }
+    Payment:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PENDING, CAPTURED, REFUSED] }
+        amount: { type: integer }
+        card:
+          type: object
+          properties:
+            brand: { type: string }
+            holder: { type: string }
+            last4: { type: string }

@@ -154,6 +154,7 @@ function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: bo
   const shown = showOut ? items : inScope
   const version =
     e.first_capture ? t('change.first')
+    : !e.version_from && !e.version_to ? t('change.docChanged') // html mode: no version to show
     : e.version_from !== e.version_to ? t('change.version', { from: e.version_from || 'n/a', to: e.version_to || 'n/a' })
     : t('change.sameVersion', { v: e.version_to || 'n/a' })
 

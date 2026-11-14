@@ -52,6 +52,7 @@ deploy/kubernetes/      base + overlays kubernetes (Ingress) / openshift (Route)
 deploy/compose.yaml     essai local avec PostgreSQL
 .gitea/workflows/ci.yml CI Gitea Actions (rejouable localement : task ci [PG=postgres://…])
 scripts/check-schemas.py  validation JSON Schema des configs du dépôt
+scripts/screenshots.sh  captures du README (docs/images) sur les APIs fictives de scripts/screenshots/ (task screenshots)
 docs/guides/            postgresql-externe, ci, exploitation (métriques, alertes)
 deploy/                 Dockerfile, compose, manifests
 docs/                   ARCHITECTURE.md, ROADMAP.md, adr/
@@ -74,6 +75,7 @@ task build                           # front embarqué + binaire bin/kansabooj (
 task image                           # image de conteneur (podman ou docker)
 task deploy:render TARGET=openshift  # manifests kustomize générés (aussi : openshift-external-db)
 task migrate                         # migrations seules (compte DDL ; cf. database.migrate: false)
+task screenshots                     # régénère docs/images après un changement visible de l'interface
 ```
 
 Les tests n'appellent jamais le réseau (httptest). Rechargement de config à chaud : `kill -HUP` ou `POST /api/admin/reload`.

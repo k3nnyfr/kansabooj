@@ -1,0 +1,67 @@
+# Configuration des captures d'écran du README : APIs FICTIVES servies en local par scripts/screenshots.sh.
+# Les hôtes *.example n'existent pas : Kansabooj passe par le proxy local de scripts/screenshots.sh, qui sert
+# scripts/screenshots/site/<hôte>/… Ne pas utiliser comme exemple de production.
+server:
+  language: fr
+http:
+  proxy: ${SHOT_PROXY}
+  deny_cidrs: []
+defaults:
+  interval: 6h
+
+groups:
+  - id: paiement
+    name: Partenaires paiement
+    description: PSP et moyens de paiement réexposés dans la Gateway
+    owner: equipe-paiement
+    tags: [pci, externe]
+  - id: logistique
+    name: Transport & logistique
+    owner: equipe-supply
+    tags: [externe]
+  - id: interne
+    name: APIs internes
+    owner: equipe-socle
+    tags: [interne]
+
+apis:
+  - id: payflow
+    name: PayFlow Checkout
+    group: paiement
+    tags: [psp]
+    source: { url: http://api.payflow.example/v3/openapi.yaml, type: openapi }
+    gateway:
+      exposed_operations:
+        - POST /payments
+        - GET /payments/{paymentId}
+        - POST /payments/{paymentId}/refunds
+
+  - id: kdo-plus
+    name: Kdo+ cartes cadeaux
+    group: paiement
+    source: { url: http://developers.kdoplus.example/swagger.json, type: openapi }
+
+  - id: colis-express
+    name: Colis Express — suivi
+    group: logistique
+    tags: [transport]
+    source: { url: http://dev.colis-express.example/docs/, type: swagger-ui }
+
+  - id: adresses
+    name: Normalisation d'adresses
+    group: logistique
+    source: { url: http://api.adresses.example/openapi.json, type: openapi }
+
+  - id: meteo-pro
+    name: Météo Pro
+    tags: [donnees]
+    owner: equipe-data
+    source:
+      url: http://www.meteo-pro.example/api/documentation.html
+      type: html
+      text_ignore: ["Dernière génération : .*"]
+
+  - id: referentiel-clients
+    name: Référentiel clients
+    group: interne
+    source: { url: http://referentiel-clients.interne.example/openapi.yaml, type: openapi }

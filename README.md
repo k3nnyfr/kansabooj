@@ -1,44 +1,155 @@
 # Kansabooj
 
-Surveillance des contrats d'API partenaires réexposées dans l'API Gateway interne.
+![version](https://img.shields.io/badge/version-v0.5-blue.svg)
 
-- Renseigner les sources dans `config/apis.yml` (voir `config/apis.example.yml`) : OpenAPI 3.x, Swagger 2.0, page Swagger-UI, Redoc, ou HTML.
-- Kansabooj vérifie périodiquement chaque contrat, détecte les changements (version, opérations, paramètres, schémas),
-  les classe (breaking / à surveiller / info), les historise et notifie Google Chat / Slack / Teams / webhook générique.
-- Le front liste les APIs avec leur état et affiche la timeline des évolutions de chacune.
+Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
-Statut : **v0.5** — serveur, interface web (FR/EN), notifications, groupes & tags, APIs internes, PostgreSQL (y compris
-serveur tiers) / Kubernetes, configuration as-code multi-équipes, jetons d'API, contrôle de contrat en CI, découverte
-des specs derrière Swagger-UI / Redoc, mode dégradé HTML, métriques Prometheus, CI Gitea Actions. Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/ROADMAP.md](docs/ROADMAP.md).
+**[Architecture](docs/ARCHITECTURE.md)** · **[Dépôt](https://git.k3nny.fr/k3nny/kansabooj)** · **[Feuille de route](docs/ROADMAP.md)** · **[Décisions (ADR)](docs/adr/)** · **[API REST](backend/internal/httpapi/openapi.yaml)** · Licence [MIT](LICENSE)
 
-## Démarrage
+![Liste des APIs surveillées : état, version, dernier check, évolutions non vues, filtres par état, groupe et tag](docs/images/apis.png)
 
-Prérequis : Go 1.26, Node 22+, [Task](https://taskfile.dev).
+## Pourquoi
 
-```bash
-task build                                          # binaire complet bin/kansabooj
-./bin/kansabooj serve --config config/apis.demo.yml # http://localhost:8080
+Un partenaire publie une nouvelle version de son API : un paramètre devient obligatoire, un champ disparaît d'une réponse. Personne n'est prévenu, et l'on découvre la rupture en production, à travers la Gateway. Kansabooj fait ce travail de veille à la place des équipes : il compare des **formes normalisées** des contrats (l'ordre des clés, le format JSON ou YAML et les champs déclarés comme bruit n'entrent pas en compte), classe chaque changement avec [oasdiff](https://github.com/oasdiff/oasdiff) et distingue ce qui touche **les opérations que vous réexposez** de tout le reste.
+
+## Ce que fait Kansabooj
+
+| Fonction | Ce qu'elle permet |
+|---|---|
+| **Sources** | OpenAPI 3.0 et 3.1, Swagger 2.0 (converti), JSON ou YAML, specs réparties en plusieurs fichiers (`$ref` externes). Derrière une page de documentation, la spec est retrouvée automatiquement : Swagger-UI, springdoc, Redoc, ou emplacements usuels. |
+| **Détection** | Version, opérations, paramètres, schémas de requête et de réponse ; chaque changement est classé **cassant**, **à surveiller** ou **info**. Les champs bruyants (`servers`, descriptions…) peuvent être ignorés par règle. |
+| **Périmètre réexposé** | `exposed_operations` liste ce que la Gateway publie : un changement hors de ce périmètre est montré à part et peut ne pas notifier. |
+| **Mode dégradé** | Une documentation en HTML seul est suivie par son texte visible (sans menus ni pied de page) ; les lignes ajoutées ou retirées sont montrées, à vérifier à la main. |
+| **Historique** | Chaque version distincte est conservée (spec brute et normalisée) ; la timeline de chaque API montre les évolutions, qui les a vues et quand. |
+| **Notifications** | Google Chat, Slack, Teams, webhook générique signé HMAC ; filtrées par niveau et par périmètre, abonnements par groupe ou par tag, envoi idempotent avec relances. |
+| **Groupes et tags** | Regrouper les APIs par domaine ou par équipe, avec héritage des réglages (API > groupe > valeurs par défaut). |
+| **Accès authentifiés** | Clé d'API, basic, bearer, OAuth2 *client credentials*, mTLS ; les identifiants ne partent jamais vers un autre hôte que celui configuré. |
+| **As-code** | La configuration est un fichier YAML versionné (avec JSON Schema pour l'autocomplétion). Chaque équipe peut maintenir son propre fragment, validé en CI par le serveur. |
+| **Contrôle de contrat en CI** | `kansabooj diff` compare la spec produite par un build à la version connue, et échoue sur une rupture dans le périmètre réexposé. |
+| **Interface** | Français ou anglais, filtres par état, groupe et tag, check à la demande, marquage « vu », page de statut. |
+| **Exploitation** | Métriques Prometheus, rechargement de la configuration à chaud, plusieurs réplicas avec élection d'un leader, image sans état en lecture seule. |
+
+## Aperçu
+
+| | |
+|---|---|
+| ![Fiche de PayFlow Checkout : passage en 3.0.0 avec cinq changements cassants dans le périmètre réexposé, puis 3.1.0](docs/images/api-breaking.png) | ![Liste regroupée par groupe d'APIs](docs/images/apis-groups.png) |
+| **Fiche d'une API** : timeline des versions, changements cassants dans le périmètre réexposé, liens vers les specs | **Groupes** : les APIs par domaine, avec leur équipe et leurs tags |
+| ![Colis Express : spec découverte derrière une page Swagger-UI, évolution déjà vue](docs/images/api-discovery.png) | ![Météo Pro : documentation HTML suivie en mode dégradé, lignes ajoutées et retirées](docs/images/api-html.png) |
+| **Découverte** : l'adresse donnée est une page Swagger-UI, la spec suivie est retrouvée derrière | **Mode dégradé** : une page HTML sans spec, comparée ligne à ligne |
+| ![Page de statut : instance leader, APIs en échec](docs/images/status.png) | |
+| **Statut** : rôle de l'instance, APIs en échec et prochains checks | |
+
+Les captures sont faites sur des APIs fictives servies en local (`scripts/screenshots/`), régénérables avec `task screenshots`.
+
+## Configuration
+
+Une API se déclare en quelques lignes dans `config/apis.yml` :
+
+```yaml
+apis:
+  - id: payflow                    # clé stable : l'historique y est rattaché
+    name: PayFlow Checkout
+    group: paiement                # hérite de l'équipe, des tags, de l'intervalle et des notifications du groupe
+    source:
+      url: https://developers.payflow.example/docs/   # spec, ou page Swagger-UI / Redoc
+      type: auto
+    auth:
+      type: oauth2_client_credentials
+      token_url: https://auth.payflow.example/token
+      client_id: kansabooj
+      client_secret: ${PAYFLOW_SECRET}                # secrets par variable d'environnement ou fichier
+    gateway:
+      exposed_operations:          # ce que la Gateway réexpose : le reste est « hors périmètre »
+        - POST /payments
+        - GET /payments/{paymentId}
+    ignore: [$.servers, $.info.description]
 ```
 
-En développement : `task serve` et `task ui:dev` (http://localhost:5173) dans deux terminaux.
-CLI : `task check -- --all`, `task history -- worldline-direct`, `task --list` pour le reste.
+Toutes les options sont décrites dans [`config/apis.example.yml`](config/apis.example.yml) et dans le JSON Schema [`config/apis.schema.json`](config/apis.schema.json). Pour tester une nouvelle source sans rien enregistrer : `kansabooj check --dry-run payflow`.
 
-Pour ajouter une API : copier un bloc de `config/apis.example.yml` (autocomplétion IDE via `config/apis.schema.json`),
-puis tester sans rien enregistrer : `task check CONFIG=config/apis.yml -- --dry-run mon-api`.
+## Sécurité
 
-## Déploiement (Kubernetes / OpenShift)
+- **Les secrets ne sont jamais écrits dans le YAML** : ils viennent de variables d'environnement ou de fichiers montés (`${VAR}`, `${file:/chemin}`), ne sont ni journalisés, ni stockés en base, ni renvoyés par l'API.
+- **Les identifiants restent sur leur origine** : une redirection, une spec découverte ou un `$ref` vers un autre hôte est appelé sans authentification.
+- **Contenu partenaire non fiable** : les scripts d'une page ne sont lus que sur le même hôte, les `$ref` externes ne sont suivis qu'en http(s) et en nombre limité, jamais vers un fichier local.
+- **Anti-SSRF** : toutes les requêtes sortantes passent par un client unique (proxy d'entreprise, `deny_cidrs` / `allow_cidrs`) ; l'accès au réseau interne est un choix explicite par profil réseau.
+- **API et interface** : jetons d'API par appelant (seule leur empreinte SHA-256 est configurée) avec des droits par usage (lecture, check, acquittement, validation, administration) ; derrière un reverse proxy SSO, l'utilisateur est repris de `X-Forwarded-User`. Aucune route ne modifie la configuration.
+- Conteneur sans état, racine en lecture seule, utilisateur non root et UID arbitraire (OpenShift), NetworkPolicy fournie.
 
-1. Une base PostgreSQL ≥ 12 (ex. `deploy/kubernetes/postgres/cluster.yaml` avec CloudNativePG) exposant un Secret
-   `kansabooj-db-app` avec une clé `uri`.
-2. Un Secret `kansabooj-secrets` (webhooks, clés partenaires référencées en `${VAR}`) et, si besoin, `kansabooj-files`
-   (certificats mTLS, secrets lus via `${file:/run/secrets/kansabooj/...}`).
-3. Adapter `deploy/kubernetes/base/apis.yml` et l'image, puis `kubectl apply -k deploy/kubernetes/overlays/openshift`
-   (ou `overlays/kubernetes`).
+## Architecture
 
-Base sur un serveur PostgreSQL tiers (équipe DBA, base managée) : section `database:` et overlay
-`openshift-external-db`, voir [docs/guides/postgresql-externe.md](docs/guides/postgresql-externe.md).
-Intégration CI (validation de config, contrôle de contrat) : [docs/guides/ci.md](docs/guides/ci.md).
-API : `GET /api/openapi.yaml`. Exploitation (métriques, alertes, CI) : [docs/guides/exploitation.md](docs/guides/exploitation.md).
+```
+              config/apis.yml (Git, ConfigMap) ──▶ ┌──────────────── kansabooj serve ───────────────┐
+                                                   │ scheduler (leader) ─▶ fetch ─▶ normalize ─▶ diff │──▶ webhooks
+ navigateur ─▶ reverse proxy (SSO) ─▶ interface ──▶│ API REST /api/*        │ proxy d'entreprise      │   (Chat, Slack,
+ CI ─────────────────────────(jeton)─────────────▶ │ /metrics               ▼                         │    Teams…)
+                                                   └──────────┬──── APIs partenaires / internes ─────┘
+                                                              ▼
+                                                   PostgreSQL (état + historique)
+```
 
-La configuration est rechargée à chaud quand le ConfigMap change. Plusieurs réplicas peuvent tourner : une seule
-planifie les checks. Essai local complet : `podman-compose -f deploy/compose.yaml up --build`.
+Un seul binaire Go embarque l'interface React. Le diff sémantique vient d'[oasdiff](https://github.com/oasdiff/oasdiff), le parsing de [kin-openapi](https://github.com/getkin/kin-openapi). PostgreSQL en production, SQLite pour un essai local ou la CLI. Les choix et leurs raisons sont détaillés dans [l'architecture](docs/ARCHITECTURE.md) et les [ADR](docs/adr/).
+
+## Démarrage rapide
+
+Il faut Go 1.26, Node 22 et [Task](https://taskfile.dev).
+
+```bash
+git clone https://git.k3nny.fr/k3nny/kansabooj && cd kansabooj
+task build                                             # interface + binaire bin/kansabooj
+./bin/kansabooj serve --config config/apis.demo.yml    # http://localhost:8080, base SQLite dans data/
+```
+
+La configuration de démo surveille deux APIs publiques, sans secret. Essai complet avec PostgreSQL : `podman-compose -f deploy/compose.yaml up --build`.
+
+## Déploiement Kubernetes / OpenShift
+
+```bash
+kubectl apply -k deploy/kubernetes/overlays/openshift    # ou overlays/kubernetes (Ingress)
+```
+
+Il faut une base PostgreSQL 12 ou plus (exemple CloudNativePG fourni), un Secret pour les webhooks et les identifiants partenaires, et la configuration en ConfigMap, rechargée à chaud quand elle change. Plusieurs réplicas peuvent tourner : un seul planifie les checks. Base gérée par une équipe DBA sur un serveur tiers : overlay `openshift-external-db`, voir [le guide](docs/guides/postgresql-externe.md).
+
+## Utilisation en CI
+
+```bash
+kansabooj diff --fail-on error kansabooj:referentiel-clients build/openapi.yaml
+```
+
+Compare la spec d'un build à la dernière version connue par le serveur, avec son périmètre réexposé et ses règles anti-bruit : code retour `1` si une rupture touche le périmètre. Un dépôt de configuration peut aussi faire valider chaque fragment d'équipe par le serveur avant merge. Exemples GitLab CI et GitHub Actions dans [le guide CI](docs/guides/ci.md).
+
+## Développement
+
+```bash
+task --list                       # toutes les tâches
+task serve                        # API + scheduler sur :8080
+task ui:dev                       # interface Vite sur :5173 (proxy /api vers :8080)
+task test                         # tests Go (SQLite) avec -race + typecheck du front
+task test:pg PG=postgres://…      # même suite sur PostgreSQL
+task ci                           # rejoue la CI Gitea Actions en local
+task screenshots                  # captures de docs/images
+```
+
+Les tests n'appellent jamais le réseau. Conventions et principes du projet : [CLAUDE.md](CLAUDE.md).
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) : besoin, choix techniques, normalisation, découverte, sécurité, marché
+- [Feuille de route](docs/ROADMAP.md) et [décisions d'architecture](docs/adr/)
+- [PostgreSQL externe](docs/guides/postgresql-externe.md) : serveur tiers, TLS, comptes et schéma dédiés, migrations séparées
+- [CI](docs/guides/ci.md) : validation des fragments de configuration, contrôle de contrat avant déploiement
+- [Exploitation](docs/guides/exploitation.md) : métriques Prometheus, alertes proposées
+- [API REST](backend/internal/httpapi/openapi.yaml) : servie aussi par `GET /api/openapi.yaml`
+
+## Limites
+
+- Les libellés des changements viennent d'oasdiff et sont **en anglais** ; l'interface et les notifications sont en français ou en anglais.
+- Le **mode dégradé HTML** signale qu'une page a changé, sans dire si le contrat est cassé : la vérification reste manuelle.
+- La découverte ne lit que la configuration visible de la page et de ses scripts du même hôte ; une page entièrement construite côté client peut demander de donner l'URL de la spec directement.
+- Les `$ref` externes ne sont pas pris en charge en Swagger 2.0, et `kansabooj diff` ne regroupe pas une spec locale répartie en plusieurs fichiers.
+- Formats non couverts : AsyncAPI, GraphQL, WSDL.
+
+## Licence
+
+Code sous licence [MIT](LICENSE).

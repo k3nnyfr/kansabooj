@@ -1,0 +1,99 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "Colis Express — suivi",
+  "version": "5.3.0"
+ },
+ "paths": {
+  "/parcels/{trackingNumber}": {
+   "get": {
+    "summary": "Suivi d'un colis",
+    "parameters": [
+     {
+      "name": "trackingNumber",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "lang",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "required": true
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Colis",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "status": {
+           "type": "string",
+           "enum": [
+            "IN_TRANSIT",
+            "DELIVERED",
+            "RETURNED"
+           ]
+          },
+          "eta": {
+           "type": "string",
+           "format": "date"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/parcels/{trackingNumber}/events": {
+   "get": {
+    "summary": "Historique",
+    "parameters": [
+     {
+      "name": "trackingNumber",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Événements"
+     }
+    },
+    "deprecated": true
+   }
+  },
+  "/parcels/{trackingNumber}/timeline": {
+   "get": {
+    "summary": "Chronologie détaillée",
+    "parameters": [
+     {
+      "name": "trackingNumber",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Chronologie"
+     }
+    }
+   }
+  }
+ }
+}

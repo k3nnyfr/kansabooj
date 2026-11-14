@@ -1,0 +1,3 @@
+{"swagger":"2.0","info":{"title":"Kdo+ cartes cadeaux","version":"1.8.2"},"host":"api.kdoplus.example","basePath":"/v1","schemes":["https"],
+"paths":{"/cards":{"post":{"summary":"Émettre une carte","parameters":[{"in":"body","name":"body","schema":{"type":"object","required":["amount"],"properties":{"amount":{"type":"integer"}}}}],"responses":{"201":{"description":"Carte émise"}}}},
+"/cards/{code}/balance":{"get":{"summary":"Solde","parameters":[{"name":"code","in":"path","required":true,"type":"string"}],"responses":{"200":{"description":"Solde","schema":{"type":"object","properties":{"balance":{"type":"integer"},"currency":{"type":"string"}}}}}}}}}

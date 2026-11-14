@@ -1,0 +1,40 @@
+openapi: 3.1.0
+info:
+  title: Référentiel clients
+  version: 1.13.0
+paths:
+  /customers/{id}:
+    get:
+      summary: Fiche client
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Client
+  /customers:
+    get:
+      summary: Rechercher des clients
+      parameters:
+      - name: q
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Clients
+  /customers/{id}/consents:
+    get:
+      summary: Consentements RGPD
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Consentements

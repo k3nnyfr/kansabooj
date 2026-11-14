@@ -107,6 +107,11 @@ tasks:
     cmds:
       - '{{.ENGINE}} build -f Containerfile --build-arg VERSION={{.VERSION}} -t {{.IMAGE}} .'
 
+  screenshots:
+    desc: Régénère les captures du README (docs/images) sur des APIs fictives servies en local
+    deps: [build]
+    cmds: ['scripts/screenshots.sh']
+
   deploy:render:
     desc: "Affiche les manifests générés — ex : task deploy:render TARGET=openshift (ou kubernetes)"
     vars: { TARGET: '{{.TARGET | default "kubernetes"}}' }

@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: PayFlow Checkout API
+  version: 3.0.0
+  description: API de paiement en ligne (données fictives).
+servers:
+- url: https://api.payflow.example/v2
+paths:
+  /payments:
+    post:
+      operationId: createPayment
+      summary: Créer un paiement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '201':
+          description: Paiement créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/{paymentId}:
+    get:
+      operationId: getPayment
+      summary: Consulter un paiement
+      parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Merchant-Tenant
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Paiement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/{paymentId}/refunds:
+    post:
+      operationId: refundPayment
+      summary: Rembourser
+      parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+      responses:
+        '201':
+          description: Remboursement créé
+  /payments/{paymentId}/captures:
+    post:
+      operationId: capturePayment
+      summary: Capturer un paiement autorisé
+      parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Capture créée
+components:
+  schemas:
+    PaymentRequest:
+      type: object
+      required:
+      - amount
+      - currency
+      - reference
+      properties:
+        amount:
+          type: integer
+        currency:
+          type: string
+        reference:
+          type: string
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CAPTURED
+          - REFUSED
+          - AUTHORIZED
+        amount:
+          type: integer
+        card:
+          type: object
+          properties:
+            brand:
+              type: string
+            last4:
+              type: string
