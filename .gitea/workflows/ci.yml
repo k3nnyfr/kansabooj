@@ -6,6 +6,11 @@
 # Node embarque les siennes, pas Go/pip → l'étape « CA système » installe ca-certificates si besoin.
 name: ci
 
+# Un push récent annule le run encore en cours sur la même branche (évite deux services postgres concurrents).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -52,9 +57,17 @@ jobs:
         run: go test -race -count=1 -timeout 5m ./...
       - name: tests (PostgreSQL)
         working-directory: backend
-        env:
-          KANSABOOJ_TEST_POSTGRES: postgres://kansabooj:kansabooj@postgres:5432/postgres?sslmode=disable
-        run: go test -race -count=1 -timeout 5m ./...
+        # Le nom « postgres » est résolu une seule fois : si le runner place plusieurs jobs sur un même réseau
+        # Docker (container.network fixé dans act_runner, runs simultanés), il désigne plusieurs serveurs et
+        # chaque connexion tomberait sur l'un ou l'autre (base temporaire « inexistante »).
+        run: |
+          ips=$(getent ahostsv4 postgres | awk '{print $1}' | sort -u)
+          if [ "$(echo "$ips" | wc -l)" -gt 1 ]; then
+            echo "::warning::« postgres » résout vers plusieurs serveurs ($(echo $ips)) : réseau Docker partagé entre jobs ?"
+          fi
+          ip=$(echo "$ips" | head -1)
+          export KANSABOOJ_TEST_POSTGRES="postgres://kansabooj:kansabooj@${ip:-postgres}:5432/postgres?sslmode=disable"
+          go test -race -count=1 -timeout 5m ./...
       - name: configuration de démo
         working-directory: backend
         run: go run ./cmd/kansabooj validate --config ../config/apis.demo.yml
