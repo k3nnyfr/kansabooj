@@ -25,9 +25,9 @@ Roadmap : `docs/ROADMAP.md`. Décisions d'architecture : `docs/adr/`.
 backend/
   cmd/kansabooj/        CLI : validate | check | history | serve | migrate | diff | token
   internal/config/      chargement + validation de apis.yml, résolution ${ENV}, fusion defaults
-  internal/discover/    URL de doc (swagger-ui, redoc, html) → URL de spec
+  internal/discover/    page de doc (Swagger-UI, Redoc, springdoc…) → URL de spec ; scripts suivis seulement sur le même hôte
   internal/fetch/       client HTTP : proxy, CA, auth, ETag, deny_cidrs, timeouts
-  internal/normalize/   parse → v2→v3 → bundle $ref → ignore rules → JSON canonique → sha256
+  internal/normalize/   parse → v2→v3 → bundle $ref externes → ignore rules → JSON canonique → sha256 ; html.go : mode dégradé
   internal/diff/        wrapper oasdiff → []ChangeItem (+ calcul in_scope vs exposed_operations)
   internal/store/       accès base (PostgreSQL / SQLite, dialect.go), migrations, blobs, verrous distribués
   internal/store/storetest/  base jetable pour les tests (SQLite, ou PostgreSQL si KANSABOOJ_TEST_POSTGRES)
@@ -35,6 +35,7 @@ backend/
   internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine), reload de config
   internal/notify/      décide/rend/envoie : slack | googlechat | teams | generic (HMAC), idempotent, retry/backoff
   internal/i18n/        catalogue FR/EN côté serveur (notifications)
+  internal/metrics/     métriques Prometheus (compteurs d'instance + collecteur par API lu en base)
   internal/httpapi/     API REST /api/* (table routes() avec scope par route), auth (jetons/SSO), validation de config,
                         openapi.yaml embarqué, front embarqué (web/dist, sinon web/placeholder.html), /healthz /readyz
   internal/token/       jetons d'API (kbj_…), seul le hash sha256 est configuré
@@ -49,6 +50,9 @@ config/apis.example.yml exemple exhaustif (toutes les options, secrets fictifs :
 config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Taskfile
 deploy/kubernetes/      base + overlays kubernetes (Ingress) / openshift (Route), exemple CloudNativePG
 deploy/compose.yaml     essai local avec PostgreSQL
+.gitea/workflows/ci.yml CI Gitea Actions (rejouable localement : task ci [PG=postgres://…])
+scripts/check-schemas.py  validation JSON Schema des configs du dépôt
+docs/guides/            postgresql-externe, ci, exploitation (métriques, alertes)
 deploy/                 Dockerfile, compose, manifests
 docs/                   ARCHITECTURE.md, ROADMAP.md, adr/
 ```
@@ -93,20 +97,25 @@ Les tests n'appellent jamais le réseau (httptest). Rechargement de config à ch
 7. **Notifications** : idempotentes (`UNIQUE(change_id, notifier)`), filtrées par `min_level` et `only_in_scope`.
    Le format de chaque plateforme vit dans son notifier ; le cœur ne manipule qu'un `ChangeEvent` neutre.
 8. Pas d'infra supplémentaire (Redis, broker, worker séparé) sans ADR justifiant le besoin.
-11. **SQL portable** PostgreSQL/SQLite : placeholders `?` (réécrits en `$n`), `TRUE`/`FALSE`, `RETURNING` (jamais
-    `LastInsertId`), `lower()` plutôt que `COLLATE NOCASE`. Toute modification du store passe `task test` **et** `task test:pg`.
-12. **Sans état en `serve`** : aucune écriture disque (racine en lecture seule en production). Le scheduler ne tourne
-    que sur le leader ; tout ce qui est planifié doit vivre dans `Scheduler.lead`.
-14. **Toute route HTTP est déclarée dans `Server.routes()` avec son scope** et décrite dans `httpapi/openapi.yaml`
-    (le test `TestOpenAPICoversRoutes` échoue sinon). Aucune route ne modifie la configuration : elle reste as-code (ADR 0003).
-15. Les fragments (`include:`) ne déclarent que `groups` et `apis` ; notifiers, profils réseau, base et serveur restent
-    dans le fichier principal. Les messages de validation citent le fichier d'origine.
-13. Héritage de configuration : **API > groupe > defaults** (`applyDefaults`). Les profils réseau ne doivent jamais
-    affaiblir le profil `default` ; l'accès au réseau interne est toujours un opt-in explicite (`network:`).
 9. **Agnostique de la Gateway** : aucun connecteur spécifique à une plateforme (Kong, Apigee…). Le seul pont prévu est
    un contrat OpenAPI exporté (`gateway.published_spec`).
 10. **Utilisable par n'importe quelle équipe** : toute nouvelle option de config est ajoutée au JSON Schema
     (`config/apis.schema.json`) et à `apis.example.yml` ; toute erreur remontée à l'utilisateur est en français et dit quoi faire.
+11. **SQL portable** PostgreSQL/SQLite : placeholders `?` (réécrits en `$n`), `TRUE`/`FALSE`, `RETURNING` (jamais
+    `LastInsertId`), `lower()` plutôt que `COLLATE NOCASE`. Toute modification du store passe `task test` **et** `task test:pg`.
+12. **Sans état en `serve`** : aucune écriture disque (racine en lecture seule en production). Le scheduler ne tourne
+    que sur le leader ; tout ce qui est planifié doit vivre dans `Scheduler.lead`.
+13. Héritage de configuration : **API > groupe > defaults** (`applyDefaults`). Les profils réseau ne doivent jamais
+    affaiblir le profil `default` ; l'accès au réseau interne est toujours un opt-in explicite (`network:`).
+14. **Toute route HTTP est déclarée dans `Server.routes()` avec son scope** et décrite dans `httpapi/openapi.yaml`
+    (le test `TestOpenAPICoversRoutes` échoue sinon). Aucune route ne modifie la configuration : elle reste as-code (ADR 0003).
+15. Les fragments (`include:`) ne déclarent que `groups` et `apis` ; notifiers, profils réseau, base et serveur restent
+    dans le fichier principal. Les messages de validation citent le fichier d'origine.
+16. **Toute requête sortante dérivée d'un contenu partenaire** (scripts de page, candidats de découverte, `$ref`
+    externes) passe par le `fetch.Client` de l'API, en http(s) uniquement, avec un nombre de requêtes borné. Ne jamais
+    utiliser `openapi3.DefaultReadFromURI` ni lire un chemin local à partir d'une spec.
+17. Ne pas changer la forme canonique des specs existantes (hash) sans migration : tout changement de normalisation
+    produirait une « évolution » fantôme sur toutes les APIs. Le bundling n'est appliqué qu'aux specs ayant des `$ref` externes.
 
 ## Conventions
 

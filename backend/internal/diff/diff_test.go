@@ -119,3 +119,13 @@ func TestScopeIgnoresParamNamesAndSupportsWildcard(t *testing.T) {
 		}
 	}
 }
+
+func TestCompareText(t *testing.T) {
+	s := CompareText([]byte("Orders API\nGET /orders\nstatus (optional)\n"), []byte("Orders API\nGET /orders\nstatus (required)\ntenant (required)\n"))
+	if s.Warns != 1 || s.MaxLevel() != LevelWarn || len(s.Items) != 4 {
+		t.Fatalf("%+v", s)
+	}
+	if s.Items[1].Text != "− status (optional)" || s.Items[2].Text != "+ status (required)" {
+		t.Errorf("items: %+v", s.Items)
+	}
+}

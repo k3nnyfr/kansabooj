@@ -110,6 +110,14 @@ apis:
 		t.Errorf("filter should exclude: %d", len(list))
 	}
 	call("GET", "/readyz", 200, nil)
+	m := call("GET", "/metrics", 200, nil)
+	for _, want := range []string{`kansabooj_api_status{api="p",group="partners",status="ok"} 1`,
+		`kansabooj_api_unacknowledged_breaking_changes{api="p",group="partners"} 1`, `kansabooj_checks_total{api="p",status="changed"}`,
+		`kansabooj_database_up 1`, `kansabooj_build_info{version=`} {
+		if !strings.Contains(m, want) {
+			t.Errorf("metrics lack %s", want)
+		}
+	}
 	var tl []store.TimelineEntry
 	call("GET", "/api/apis/p/timeline", 200, &tl)
 	if len(tl) != 2 {

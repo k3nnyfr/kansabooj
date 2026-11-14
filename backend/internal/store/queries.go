@@ -20,6 +20,7 @@ type APIRow struct {
 	Tags              []string   `json:"tags"`
 	Network           string     `json:"network"`
 	SourceURL         string     `json:"source_url"`
+	ResolvedSpecURL   string     `json:"resolved_spec_url,omitempty"`
 	SourceType        string     `json:"source_type"`
 	Enabled           bool       `json:"enabled"`
 	Status            string     `json:"status"`
@@ -41,7 +42,7 @@ type APIRow struct {
 }
 
 const apiSelect = `
-SELECT a.id, a.name, COALESCE(a.owner,''), COALESCE(a.group_id,''), a.tags, a.network_profile, a.source_url, a.source_type, a.enabled, a.status, COALESCE(a.last_error,''),
+SELECT a.id, a.name, COALESCE(a.owner,''), COALESCE(a.group_id,''), a.tags, a.network_profile, a.source_url, COALESCE(a.resolved_spec_url,''), a.source_type, a.enabled, a.status, COALESCE(a.last_error,''),
   COALESCE((SELECT c.error_kind FROM checks c WHERE c.api_id = a.id ORDER BY c.started_at DESC, c.id DESC LIMIT 1), ''),
   a.consecutive_errors, a.last_checked_at, a.next_check_at,
   COALESCE(s.info_version,''), COALESCE(s.spec_format,''), COALESCE(s.title,''), COALESCE(s.operation_count,0), a.current_snapshot_id,
@@ -58,7 +59,7 @@ func scanAPI(sc interface{ Scan(...any) error }) (*APIRow, error) {
 	var last, next, lastChange sql.NullString
 	var snap sql.NullInt64
 	var tags string
-	err := sc.Scan(&r.ID, &r.Name, &r.Owner, &r.Group, &tags, &r.Network, &r.SourceURL, &r.SourceType, &r.Enabled, &r.Status, &r.LastError, &r.LastErrorKind,
+	err := sc.Scan(&r.ID, &r.Name, &r.Owner, &r.Group, &tags, &r.Network, &r.SourceURL, &r.ResolvedSpecURL, &r.SourceType, &r.Enabled, &r.Status, &r.LastError, &r.LastErrorKind,
 		&r.ConsecutiveErrors, &last, &next, &r.Version, &r.Format, &r.Title, &r.OperationCount, &snap,
 		&lastChange, &r.ChangeCount, &r.Unacknowledged, &r.UnackedBreaking, &r.ConfigJSON)
 	if err != nil {
@@ -117,6 +118,7 @@ type TimelineEntry struct {
 	InScope        int        `json:"in_scope"`
 	InScopeErrors  int        `json:"in_scope_errors"`
 	FirstCapture   bool       `json:"first_capture"`
+	Semantic       bool       `json:"semantic"` // false: degraded mode (page text)
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 	AcknowledgedBy string     `json:"acknowledged_by,omitempty"`
 }
@@ -125,7 +127,7 @@ const changeSelect = `
 SELECT ch.id, ch.detected_at, ch.from_snapshot_id, ch.to_snapshot_id, COALESCE(ch.version_from,''), COALESCE(ch.version_to,''),
   ch.error_count, ch.warn_count, ch.info_count, ch.in_scope_count,
   (SELECT COUNT(*) FROM change_items i WHERE i.change_id = ch.id AND i.level = 'error' AND i.in_scope = TRUE),
-  ch.acknowledged_at, COALESCE(ch.acknowledged_by,'')
+  ch.acknowledged_at, COALESCE(ch.acknowledged_by,''), ch.semantic
 FROM changes ch`
 
 func scanChange(sc interface{ Scan(...any) error }) (*TimelineEntry, error) {
@@ -134,7 +136,7 @@ func scanChange(sc interface{ Scan(...any) error }) (*TimelineEntry, error) {
 	var from sql.NullInt64
 	var ack sql.NullString
 	if err := sc.Scan(&e.ID, &detected, &from, &e.ToSnapshotID, &e.VersionFrom, &e.VersionTo,
-		&e.Errors, &e.Warns, &e.Infos, &e.InScope, &e.InScopeErrors, &ack, &e.AcknowledgedBy); err != nil {
+		&e.Errors, &e.Warns, &e.Infos, &e.InScope, &e.InScopeErrors, &ack, &e.AcknowledgedBy, &e.Semantic); err != nil {
 		return nil, err
 	}
 	if t := parseTime(sql.NullString{String: detected, Valid: true}); t != nil {

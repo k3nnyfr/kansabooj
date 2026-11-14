@@ -203,6 +203,17 @@ func validate(c *Config) []string {
 		if !isHTTPURL(a.Source.URL) {
 			add("%s : source.url absente ou invalide (http/https attendu)", where)
 		}
+		for _, expr := range a.Source.TextIgnore {
+			if _, err := regexp.Compile(expr); err != nil {
+				add("%s : source.text_ignore %q : expression régulière invalide (%v)", where, expr, err)
+			}
+		}
+		if len(a.Source.TextIgnore) > 0 && a.Source.Type != SourceHTML && a.Source.Type != SourceAuto {
+			add("%s : source.text_ignore ne s'applique qu'aux types html et auto", where)
+		}
+		if a.Source.SpecName != "" && a.Source.Type == SourceOpenAPI || a.Source.SpecName != "" && a.Source.Type == SourceHTML {
+			add("%s : source.spec_name ne s'applique qu'aux types swagger-ui, redoc et auto", where)
+		}
 		if !slices.Contains(sourceTypes, a.Source.Type) {
 			add("%s : source.type %q inconnu (valeurs possibles : %s)", where, a.Source.Type, strings.Join(sourceTypes, ", "))
 		}

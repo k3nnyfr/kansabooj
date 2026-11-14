@@ -47,6 +47,16 @@ paths:
       security: []
       responses:
         "200": { description: Spécification OpenAPI, content: { application/yaml: { schema: { type: string } } } }
+  /metrics:
+    get:
+      tags: [service]
+      summary: Métriques Prometheus (scope read)
+      description: |
+        Compteurs de l'instance (checks, durées, notifications, rechargements, leader) et état par API lu en base
+        (statut, évolutions non vues, cassantes, échecs consécutifs, date du dernier check).
+      responses:
+        "200": { description: Format d'exposition Prometheus, content: { text/plain: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/meta:
     get:
       tags: [service]
@@ -223,6 +233,7 @@ components:
         tags: { type: array, items: { type: string } }
         network: { type: string }
         source_url: { type: string, format: uri }
+        resolved_spec_url: { type: string, format: uri, description: "spec effectivement suivie (découverte derrière une page)" }
         source_type: { type: string }
         enabled: { type: boolean }
         status: { $ref: "#/components/schemas/ApiStatus" }
@@ -259,6 +270,8 @@ components:
         error: { type: string }
         error_kind: { type: string }
         change_id: { type: integer }
+        resolved_spec_url: { type: string }
+        discovery: { type: string, description: "comment la spec a été trouvée derrière la page" }
         summary:
           type: object
           properties: { errors: { type: integer }, warns: { type: integer }, infos: { type: integer }, in_scope: { type: integer } }
@@ -277,6 +290,7 @@ components:
         in_scope: { type: integer }
         in_scope_errors: { type: integer }
         first_capture: { type: boolean }
+        semantic: { type: boolean, description: "false : mode dégradé (texte de la page, sans analyse du contrat)" }
         acknowledged_at: { type: string, format: date-time }
         acknowledged_by: { type: string }
     ChangeItem:

@@ -265,11 +265,21 @@ func runCheck(ctx context.Context, args []string) int {
 func printOutcome(w io.Writer, api *config.API, o *monitor.Outcome, dry bool) {
 	fmt.Fprintf(w, "\n▶ %s — %s\n", api.ID, api.Name)
 	fmt.Fprintf(w, "  source     %s\n", api.Source.URL)
-	if o.FetchedURL != "" && o.FetchedURL != api.Source.URL {
+	if o.Discovery != "" {
+		fmt.Fprintf(w, "  découverte %s\n             via %s\n", o.ResolvedURL, o.Discovery)
+	}
+	if len(o.Alternatives) > 1 {
+		fmt.Fprintf(w, "  specs      la page en déclare %d : %s (choisir avec source.spec_name)\n", len(o.Alternatives), strings.Join(o.Alternatives, ", "))
+	}
+	if o.FetchedURL != "" && o.FetchedURL != api.Source.URL && o.FetchedURL != o.ResolvedURL {
 		fmt.Fprintf(w, "  redirigé   %s\n", o.FetchedURL)
 	}
 	if o.Spec != nil {
-		fmt.Fprintf(w, "  contrat    %s · « %s » version %s · %d opérations\n", o.Spec.Format, o.Spec.Title, o.Spec.Version, o.Spec.OperationCount)
+		if o.Spec.Format == "html" {
+			fmt.Fprintf(w, "  contrat    mode dégradé (texte de la page « %s », pas d'analyse sémantique)\n", o.Spec.Title)
+		} else {
+			fmt.Fprintf(w, "  contrat    %s · « %s » version %s · %d opérations\n", o.Spec.Format, o.Spec.Title, o.Spec.Version, o.Spec.OperationCount)
+		}
 		fmt.Fprintf(w, "  empreinte  sha256:%s\n", o.Spec.SHA256[:16])
 	}
 	suffix := ""

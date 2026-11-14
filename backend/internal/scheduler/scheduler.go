@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
+	"git.k3nny.fr/kansabooj/internal/metrics"
 	"git.k3nny.fr/kansabooj/internal/monitor"
 	"git.k3nny.fr/kansabooj/internal/notify"
 	"git.k3nny.fr/kansabooj/internal/store"
@@ -107,6 +108,7 @@ func (s *Scheduler) setLeader(v bool) {
 	s.mu.Lock()
 	s.leader = v
 	s.mu.Unlock()
+	metrics.SetLeader(v)
 }
 
 // lead runs the scheduling loop while the leader lock is held.
@@ -255,6 +257,7 @@ func (s *Scheduler) run(ctx context.Context, apiID, trigger string) (*monitor.Ou
 		s.log.Error("check en échec interne", "api", apiID, "err", err)
 		return nil, err
 	}
+	metrics.ObserveCheck(apiID, o.Status, o.Duration)
 	attrs := []any{"api", apiID, "trigger", trigger, "status", o.Status, "duration", o.Duration.Round(time.Millisecond)}
 	switch o.Status {
 	case monitor.StatusError:
@@ -271,10 +274,11 @@ func (s *Scheduler) run(ctx context.Context, apiID, trigger string) (*monitor.Ou
 // Reload re-reads the configuration file. On error the running configuration is kept.
 func (s *Scheduler) Reload(ctx context.Context) error {
 	cfg, err := config.Load(s.path)
-	if err != nil {
-		return err
+	if err == nil {
+		err = s.store.SyncAPIs(ctx, cfg.APIs)
 	}
-	if err := s.store.SyncAPIs(ctx, cfg.APIs); err != nil {
+	metrics.ObserveReload(err == nil)
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()

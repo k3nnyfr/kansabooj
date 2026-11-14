@@ -11,6 +11,7 @@ export interface ApiRow {
   tags: string[]
   network: string
   source_url: string
+  resolved_spec_url?: string
   source_type: string
   enabled: boolean
   status: ApiStatus
@@ -65,6 +66,7 @@ export interface TimelineEntry {
   in_scope: number
   in_scope_errors: number
   first_capture: boolean
+  semantic: boolean
   acknowledged_at?: string
   acknowledged_by?: string
 }
@@ -90,6 +92,8 @@ export interface CheckResult {
   error?: string
   error_kind?: string
   change_id?: number
+  resolved_spec_url?: string
+  discovery?: string
 }
 
 export interface Group {

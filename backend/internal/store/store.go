@@ -261,6 +261,7 @@ ON CONFLICT (id) DO UPDATE SET
 // APIState is the mutable state of a monitored API.
 type APIState struct {
 	ID                string
+	ResolvedURL       string // spec URL found by discovery (or the source URL)
 	Status            string
 	ConsecutiveErrors int
 	ETag              string
@@ -281,17 +282,17 @@ type Snapshot struct {
 
 func (s *Store) State(ctx context.Context, apiID string) (*APIState, error) {
 	st := &APIState{ID: apiID}
-	var etag, lm sql.NullString
+	var etag, lm, resolved sql.NullString
 	var snapID sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT status, consecutive_errors, etag, last_modified, current_snapshot_id FROM apis WHERE id = ?`, apiID).
-		Scan(&st.Status, &st.ConsecutiveErrors, &etag, &lm, &snapID)
+	err := s.db.QueryRowContext(ctx, `SELECT status, consecutive_errors, etag, last_modified, resolved_spec_url, current_snapshot_id FROM apis WHERE id = ?`, apiID).
+		Scan(&st.Status, &st.ConsecutiveErrors, &etag, &lm, &resolved, &snapID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("API %q inconnue en base (configuration non synchronisée ?)", apiID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	st.ETag, st.LastModified = etag.String, lm.String
+	st.ETag, st.LastModified, st.ResolvedURL = etag.String, lm.String, resolved.String
 	if snapID.Valid {
 		st.Current = &Snapshot{ID: snapID.Int64}
 		var ver, title sql.NullString
@@ -303,6 +304,16 @@ func (s *Store) State(ctx context.Context, apiID string) (*APIState, error) {
 		st.Current.Version, st.Current.Title = ver.String, title.String
 	}
 	return st, nil
+}
+
+// SetResolvedURL records the spec URL actually fetched for an API. When it changes,
+// the HTTP validators (ETag…) of the previous URL are dropped.
+func (s *Store) SetResolvedURL(ctx context.Context, apiID, u string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE apis SET
+  etag = CASE WHEN resolved_spec_url IS NOT DISTINCT FROM ? THEN etag END,
+  last_modified = CASE WHEN resolved_spec_url IS NOT DISTINCT FROM ? THEN last_modified END,
+  resolved_spec_url = ? WHERE id = ?`, u, u, u, apiID)
+	return err
 }
 
 // Blob returns the decompressed content of a stored blob.
@@ -372,14 +383,15 @@ func (s *Store) RecordError(ctx context.Context, c CheckRecord, staleThreshold i
 
 // NewVersion is a detected contract change to persist atomically.
 type NewVersion struct {
-	Check      CheckRecord
-	Raw        []byte
-	RawMedia   string
-	Normalized []byte
-	Snapshot   Snapshot
-	PrevSnapID *int64
-	Summary    *diff.Summary
-	Semantic   bool
+	Check           CheckRecord
+	Raw             []byte
+	RawMedia        string
+	Normalized      []byte
+	NormalizedMedia string // default application/json
+	Snapshot        Snapshot
+	PrevSnapID      *int64
+	Summary         *diff.Summary
+	Semantic        bool
 }
 
 // SaveNewVersion stores blobs, snapshot, change and items, and moves the API to it.
@@ -391,7 +403,11 @@ func (s *Store) SaveNewVersion(ctx context.Context, v NewVersion) (int64, error)
 		if err != nil {
 			return err
 		}
-		normSHA, err := putBlob(ctx, tx, v.Normalized, "application/json")
+		media := v.NormalizedMedia
+		if media == "" {
+			media = "application/json"
+		}
+		normSHA, err := putBlob(ctx, tx, v.Normalized, media)
 		if err != nil {
 			return err
 		}

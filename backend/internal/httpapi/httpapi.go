@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
+	"git.k3nny.fr/kansabooj/internal/metrics"
 	"git.k3nny.fr/kansabooj/internal/monitor"
 	"git.k3nny.fr/kansabooj/internal/scheduler"
 	"git.k3nny.fr/kansabooj/internal/store"
@@ -37,13 +38,14 @@ type Runtime interface {
 }
 
 type Server struct {
-	rt    Runtime
-	store *store.Store
-	log   *slog.Logger
+	rt      Runtime
+	store   *store.Store
+	log     *slog.Logger
+	metrics http.Handler
 }
 
 func New(rt Runtime, st *store.Store, log *slog.Logger) *Server {
-	return &Server{rt: rt, store: st, log: log}
+	return &Server{rt: rt, store: st, log: log, metrics: metrics.Handler(st, Version)}
 }
 
 // route is an API endpoint; scope "" means public (probes, API description).
@@ -57,6 +59,7 @@ func (s *Server) routes() []route {
 		{"GET", "/healthz", "", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }}, // liveness
 		{"GET", "/readyz", "", s.ready}, // readiness
 		{"GET", "/api/openapi.yaml", "", s.openapi},
+		{"GET", "/metrics", "read", s.serveMetrics},
 		{"GET", "/api/meta", "read", s.meta},
 		{"GET", "/api/status", "read", s.status},
 		{"GET", "/api/apis", "read", s.listAPIs},
@@ -85,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/", spa())
 	return s.logged(mux)
 }
+
+func (s *Server) serveMetrics(w http.ResponseWriter, r *http.Request) { s.metrics.ServeHTTP(w, r) }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -247,6 +252,12 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	}
 	if o.ChangeID != 0 {
 		res["change_id"] = o.ChangeID
+	}
+	if o.ResolvedURL != "" {
+		res["resolved_spec_url"] = o.ResolvedURL
+	}
+	if o.Discovery != "" {
+		res["discovery"] = o.Discovery
 	}
 	if o.Summary != nil {
 		res["summary"] = map[string]int{"errors": o.Summary.Errors, "warns": o.Summary.Warns, "infos": o.Summary.Infos, "in_scope": o.Summary.InScope}

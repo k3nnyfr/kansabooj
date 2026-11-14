@@ -129,6 +129,22 @@ tasks:
     deps: [ui:install]
     cmds: [npm run lint]
 
+  schemas:
+    desc: Valide les fichiers de configuration du dépôt contre leur JSON Schema (python3 + jsonschema + pyyaml)
+    cmds: [python3 scripts/check-schemas.py]
+
+  ci:
+    desc: "Rejoue localement la CI (PG=… pour inclure les tests PostgreSQL)"
+    cmds:
+      - task: lint
+      - task: test:go
+      - task: '{{if .PG}}test:pg{{else}}lint:ui{{end}}'
+        vars: { PG: '{{.PG}}' }
+      - task: schemas
+      - task: ui:build
+      - for: [kubernetes, openshift, openshift-external-db]
+        cmd: kubectl kustomize deploy/kubernetes/overlays/{{.ITEM}} > /dev/null && echo "kustomize {{.ITEM}} ok"
+
   clean:
     desc: Supprime binaires, base locale et builds
     cmds:

@@ -645,7 +645,19 @@
                   "html",
                   "auto"
                 ],
-                "default": "auto"
+                "default": "auto",
+                "description": "openapi : URL du fichier de spec ; swagger-ui / redoc : page dont la spec est découverte ; html : texte de la page (mode dégradé) ; auto : spec directe, sinon découverte, sinon html"
+              },
+              "spec_name": {
+                "type": "string",
+                "description": "page Swagger-UI déclarant plusieurs specs (urls) : nom de celle à surveiller"
+              },
+              "text_ignore": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "mode html : expressions régulières retirées du texte (dates, numéros de build…)"
               }
             }
           },

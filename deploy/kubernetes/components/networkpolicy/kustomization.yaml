@@ -1,0 +1,6 @@
+# Flux réseau minimaux de Kansabooj (à activer dans un overlay : components: [../../components/networkpolicy]).
+# Adapter les plages : proxy sortant d'entreprise, PostgreSQL, réseaux des APIs internes (profil « internal »).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - networkpolicy.yaml

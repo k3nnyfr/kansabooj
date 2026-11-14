@@ -119,7 +119,8 @@ apis:
     owner: equipe-commandes
     source:
       url: https://developer.partner-x.example/docs/      # page Swagger-UI : la spec est découverte
-      type: swagger-ui
+      type: swagger-ui                                    # (swagger-initializer.js, configUrl springdoc, urls…)
+      spec_name: Commandes v2                             # si la page déclare plusieurs specs
     auth:
       type: header                       # header | query | basic | bearer | oauth2_client_credentials | mtls
       name: X-API-Key
@@ -163,6 +164,7 @@ apis:
     source:
       url: https://partner-y.example/api-documentation.html
       type: html                         # mode dégradé : détection de changement de texte, pas de diff sémantique
+      text_ignore: ["Dernière mise à jour : \\S+", "Build #\\d+"]
     interval: 24h
 
   - id: referentiel-clients

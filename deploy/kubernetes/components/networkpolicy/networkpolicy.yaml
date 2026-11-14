@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kansabooj
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: kansabooj }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [ { port: 8080, protocol: TCP } ]     # Ingress / Route, Prometheus (/metrics)
+  egress:
+    - ports:                                       # DNS du cluster
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to: [ { ipBlock: { cidr: 10.20.0.10/32 } } ] # proxy sortant d'entreprise (specs partenaires, webhooks)
+      ports: [ { port: 3128, protocol: TCP } ]
+    - to: [ { ipBlock: { cidr: 10.30.0.0/24 } } ]  # serveur PostgreSQL
+      ports: [ { port: 5432, protocol: TCP } ]
+    - to: [ { ipBlock: { cidr: 10.40.0.0/16 } } ]  # APIs internes surveillées (profil réseau « internal »)
+      ports: [ { port: 443, protocol: TCP } ]

@@ -1,0 +1,118 @@
+# CI Gitea Actions (syntaxe compatible GitHub Actions).
+# Prérequis runner (act_runner) : jobs en conteneur avec accès au démon Docker pour le job « image »
+# (montage de /var/run/docker.sock ou DinD). Secrets : REGISTRY_USER, REGISTRY_TOKEN (jeton Gitea avec
+# droit write:package). Variable optionnelle : REGISTRY (défaut git.k3nny.fr).
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kansabooj
+          POSTGRES_PASSWORD: kansabooj
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd "pg_isready -U kansabooj" --health-interval 2s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: gofmt
+        working-directory: backend
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+      - name: tests (SQLite)
+        working-directory: backend
+        run: go test -race -count=1 -timeout 5m ./...
+      - name: tests (PostgreSQL)
+        working-directory: backend
+        env:
+          KANSABOOJ_TEST_POSTGRES: postgres://kansabooj:kansabooj@postgres:5432/postgres?sslmode=disable
+        run: go test -race -count=1 -timeout 5m ./...
+      - name: configuration de démo
+        working-directory: backend
+        run: go run ./cmd/kansabooj validate --config ../config/apis.demo.yml
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+          npm run build
+
+  config-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: JSON Schema des configurations
+        run: |
+          pip install --quiet jsonschema==4.23.0 pyyaml==6.0.2
+          python3 scripts/check-schemas.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: rendu kustomize
+        run: |
+          for o in kubernetes openshift openshift-external-db; do
+            echo "== $o"
+            go run sigs.k8s.io/kustomize/kustomize/v5@v5.5.0 build deploy/kubernetes/overlays/$o > /dev/null
+          done
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, config-and-deploy]
+    env:
+      REGISTRY: ${{ vars.REGISTRY || 'git.k3nny.fr' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: build
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          IMAGE="$REGISTRY/${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          docker build -f Containerfile --build-arg VERSION="$VERSION" -t "$IMAGE:$VERSION" .
+      - name: scan (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ env.VERSION }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: push (main et tags)
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "$REGISTRY" -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            docker tag "$IMAGE:$VERSION" "$IMAGE:latest" && docker push "$IMAGE:latest"
+          else
+            docker tag "$IMAGE:$VERSION" "$IMAGE:main" && docker push "$IMAGE:main"
+          fi

@@ -45,13 +45,21 @@
 - [x] Jetons d'API à portée limitée (`read`, `check`, `ack`, `validate`, `admin`), `require_identity`, `admins`
 - [x] `kansabooj diff` (fichiers, URLs, `kansabooj:<api-id>`) + guide « Kansabooj dans la CI »
 
-## v0.5 — Robustesse
-- [ ] `discover` : Swagger-UI (initializer, swagger-config, `urls:` multiples), Redoc, heuristiques de chemins
-- [ ] Mode dégradé `html` (hash du texte extrait)
-- [ ] Specs multi-fichiers (`$ref` externes)
-- [ ] `/metrics` Prometheus (purge des `checks` : fait en v0.2)
-- [ ] Chart Helm (si les équipes d'exploitation le préfèrent à kustomize), NetworkPolicy d'egress
-- [ ] CI : tests SQLite + PostgreSQL, build et scan de l'image
+## v0.5 — Découverte, observabilité, CI ✅ 2026-11-14
+- [x] `discover` : Swagger-UI (initializer, `url` / `urls` / `configUrl`, variable JS, URL calculée), springdoc,
+      Redoc, Swashbuckle et emplacements usuels ; URL mémorisée et réutilisée, redécouverte si elle disparaît ; `spec_name`
+- [x] Mode dégradé `html` (texte extrait, `text_ignore`, diff ligne à ligne) ; type `auto` avec repli poli
+- [x] Specs multi-fichiers (`$ref` externes OpenAPI 3, http(s) uniquement, via la politique réseau de l'API)
+- [x] `/metrics` Prometheus + guide d'exploitation (alertes suggérées)
+- [x] CI Gitea Actions : tests SQLite + PostgreSQL, front, schémas, kustomize, image + scan Trivy + push registre
+- [x] Composant NetworkPolicy
+
+## v0.6 — Pistes
+- [ ] Diff libre entre deux versions arbitraires dans l'interface (vue côte à côte des specs normalisées)
+- [ ] Digest quotidien / hebdomadaire au lieu de notifications unitaires
+- [ ] Traduction française des libellés oasdiff (catalogue par `rule_id`)
+- [ ] Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
+- [ ] `$ref` externes en Swagger 2.0 ; `kansabooj diff` sur des specs multi-fichiers locales
 
 ## Plus tard (selon retours)
 - Traduction française des libellés de changements oasdiff (catalogue par `rule_id`, oasdiff n'existant qu'en anglais)

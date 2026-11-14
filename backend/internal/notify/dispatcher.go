@@ -13,6 +13,7 @@ import (
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/diff"
 	"git.k3nny.fr/kansabooj/internal/fetch"
+	"git.k3nny.fr/kansabooj/internal/metrics"
 	"git.k3nny.fr/kansabooj/internal/monitor"
 	"git.k3nny.fr/kansabooj/internal/store"
 )
@@ -157,6 +158,7 @@ func (d *Dispatcher) RetryLoop(ctx context.Context, every time.Duration) {
 func (d *Dispatcher) attempt(ctx context.Context, n *config.Notifier, rec *store.Notification) {
 	err := d.send(ctx, n, rec.Payload)
 	if err == nil {
+		metrics.ObserveNotification(n.Name, rec.Kind, "sent")
 		d.log.Info("notification envoyée", "notifier", n.Name, "api", rec.APIID, "kind", rec.Kind)
 		d.store.MarkNotification(ctx, rec.ID, "", nil)
 		return
@@ -165,6 +167,11 @@ func (d *Dispatcher) attempt(ctx context.Context, n *config.Notifier, rec *store
 	if rec.Attempts < len(backoff) {
 		t := d.now().Add(backoff[rec.Attempts])
 		next = &t
+	}
+	if next == nil {
+		metrics.ObserveNotification(n.Name, rec.Kind, "failed")
+	} else {
+		metrics.ObserveNotification(n.Name, rec.Kind, "retry")
 	}
 	d.log.Warn("échec d'envoi de notification", "notifier", n.Name, "api", rec.APIID, "attempt", rec.Attempts+1, "err", err, "abandon", next == nil)
 	d.store.MarkNotification(ctx, rec.ID, err.Error(), next)

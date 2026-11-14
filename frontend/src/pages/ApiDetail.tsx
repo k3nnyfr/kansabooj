@@ -53,6 +53,11 @@ export function ApiDetail() {
               <TagList tags={a.tags} />
             </div>
           )}
+          {a.resolved_spec_url && a.resolved_spec_url !== a.source_url && (
+            <div className="small">
+              {t('detail.resolved')} : <a href={a.resolved_spec_url} target="_blank" rel="noreferrer" className="mono">{a.resolved_spec_url}</a>
+            </div>
+          )}
           <div className="small">
             {t('detail.source')} : <a href={a.source_url} target="_blank" rel="noreferrer" className="mono">{a.source_url}</a>
           </div>
@@ -66,6 +71,7 @@ export function ApiDetail() {
       </header>
 
       {lastCheck && <CheckFeedback r={lastCheck} />}
+      {a.format === 'html' && <div className="callout callout-warn small">{t('detail.degraded')}</div>}
       {a.status !== 'ok' && a.status !== 'pending' && (
         <ErrorHint kind={a.last_error_kind} detail={a.last_error} consecutive={a.consecutive_errors} />
       )}
@@ -120,7 +126,12 @@ function CheckFeedback({ r }: { r: CheckResult }) {
   const { t } = useI18n()
   if (r.status === 'error') return <ErrorHint kind={r.error_kind} detail={r.error} />
   const msg = r.status === 'changed' ? t('check.changed') : r.not_modified ? t('check.notModified') : t('check.unchanged')
-  return <div className={`callout ${r.status === 'changed' ? 'callout-warn' : 'callout-ok'}`}>{msg} · {r.duration_ms} ms</div>
+  return (
+    <div className={`callout ${r.status === 'changed' ? 'callout-warn' : 'callout-ok'}`}>
+      {msg} · {r.duration_ms} ms
+      {r.discovery && <div className="small muted">{t('check.discovery', { how: r.discovery })}</div>}
+    </div>
+  )
 }
 
 function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: boolean }) {
@@ -154,6 +165,7 @@ function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: bo
           <span className="tl-date" title={date(e.detected_at)}>{date(e.detected_at)}</span>
           <span className="tl-version">{version}</span>
           {!e.first_capture && <Counts errors={e.errors} warns={e.warns} infos={e.infos} />}
+          {!e.semantic && !e.first_capture && <span className="badge level-warn">{t('change.degraded')}</span>}
           {unseen && <span className="badge unseen">{t('change.new')}</span>}
         </button>
         {open && !e.first_capture && (

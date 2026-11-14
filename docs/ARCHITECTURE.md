@@ -16,11 +16,27 @@
 ## 2. Challenge — ce qui va réellement poser problème
 
 ### 2.1 « Swagger-UI » n'est pas un contrat
-Une page Swagger-UI / Redoc est du HTML qui *charge* une spec. Il faut la retrouver :
-`swagger-initializer.js` (`url:` / `urls:`), `swagger-config` (`/v3/api-docs/swagger-config` côté springdoc),
-attribut `spec-url` de Redoc, `<link rel="...">`, puis heuristiques classiques (`/v3/api-docs`, `/openapi.json`, `/swagger.json`…).
-**Décision** : un module `discover` dédié, qui résout une URL en *URL de spec* et enregistre ce qu'il a trouvé.
-Pour une doc purement HTML/PDF sans spec : **mode dégradé** = hash du texte extrait, détection « ça a changé » sans diff sémantique. On l'affiche clairement comme tel, on ne fait pas semblant.
+Une page Swagger-UI / Redoc est du HTML qui *charge* une spec. Module `discover` (v0.5), par ordre de confiance :
+1. configuration explicite : paramètre `?url=`, `SwaggerUIBundle({ url | urls | configUrl })` dans la page ou dans les
+   scripts **du même hôte** (`swagger-initializer.js`…), `swagger-config` de springdoc, `<redoc spec-url>`, `Redoc.init(…)`,
+   variable JavaScript constante (`url: definitionURL` → `const definitionURL = "…"`) ;
+2. URLs « ressemblant à une spec » mentionnées dans ces scripts, celles du même hôte d'abord (cas d'une URL calculée en JS) ;
+3. emplacements usuels (`/openapi.json`, `/v3/api-docs`, `/swagger/v1/swagger.json`…), au plus 16 requêtes.
+
+Chaque candidat est validé (c'est bien une spec OpenAPI/Swagger) avant d'être retenu. L'URL trouvée est mémorisée
+(`resolved_spec_url`) et requêtée directement aux checks suivants, avec ETag ; si elle disparaît, la découverte est rejouée.
+Plusieurs specs déclarées (`urls`) : la première par défaut, `source.spec_name` pour choisir.
+Vérifié sur petstore3.swagger.io (URL calculée en JavaScript) et la démo Redoc.
+
+**Mode dégradé `html`** : documentation sans spec exploitable. Le texte visible est extrait (scripts, styles, navigation
+et pied de page exclus, `source.text_ignore` pour retirer dates et numéros de build), haché et comparé ligne à ligne :
+une évolution est signalée en niveau `warn` (« vérification manuelle ») avec les lignes ajoutées/retirées, sans analyse
+du contrat. Le type `auto` bascule en mode dégradé si aucune spec n'est trouvée, sans resonder ensuite les emplacements
+usuels à chaque check ; si une spec apparaît plus tard derrière la page, le changement de mode est signalé.
+
+**Specs multi-fichiers** : les `$ref` externes (OpenAPI 3) sont résolues via le client HTTP de l'API (politique réseau,
+identifiants limités à l'origine), **http(s) uniquement** (jamais `file://` ni chemin local), au plus 64 fichiers, puis
+internalisées : la forme canonique stockée est autonome.
 
 ### 2.2 Le bruit tuera l'outil avant les vrais changements
 Si on compare des octets, on aura des faux positifs en permanence : ordre des clés, `servers` qui varient selon l'environnement,
@@ -152,7 +168,7 @@ Cible principale : OpenShift / Kubernetes, avec **le moins d'adhérence possible
 | Front | **React + Vite + TypeScript**, TanStack Query, embarqué via `go:embed` | Un seul artefact à déployer |
 | Scheduler | interne (`time.Ticker` + jitter), leader élu par verrou PostgreSQL | pas d'infra supplémentaire, HA native |
 | Notifs | notifiers typés : `slack` (Block Kit), `googlechat` (cardsV2), `teams`, `generic` (JSON signé HMAC) | les formats diffèrent vraiment entre plateformes |
-| Observabilité | `/healthz`, `/metrics` Prometheus, logs JSON (`log/slog`) | |
+| Observabilité | `/healthz`, `/readyz`, `/metrics` Prometheus (état par API lu en base + compteurs d'instance), logs JSON (`log/slog`) | voir `docs/guides/exploitation.md` |
 | Auth front | reverse proxy SSO (header `X-Forwarded-User`) | le front est read-only sauf l'acquittement |
 
 ## 4. Flux d'un check

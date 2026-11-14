@@ -231,6 +231,11 @@ type API struct {
 type Source struct {
 	URL  string `yaml:"url" json:"url"`
 	Type string `yaml:"type" json:"type"`
+	// SpecName picks one spec when a Swagger-UI page declares several ("urls").
+	SpecName string `yaml:"spec_name" json:"spec_name,omitempty"`
+	// TextIgnore: regular expressions removed from the page text in html mode
+	// (dates, build numbers…) before hashing.
+	TextIgnore []string `yaml:"text_ignore" json:"text_ignore,omitempty"`
 }
 
 type Gateway struct {

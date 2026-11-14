@@ -5,11 +5,13 @@ package normalize
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,11 +34,47 @@ type Result struct {
 	Title          string
 	OperationCount int
 	Doc            *openapi3.T
+	Bundled        bool // external $refs were fetched and internalized
 }
+
+// Options configure NormalizeWith.
+type Options struct {
+	Ignore []string // JSONPath-subset expressions ($.a.b, * as key wildcard) removed before hashing
+	// Location of the document, against which relative external $refs are resolved.
+	Location string
+	// Fetch reads an external $ref target. nil: documents with external refs are rejected.
+	// It must go through the API's fetch client (network policy, origin-bound credentials).
+	Fetch func(ctx context.Context, url string) ([]byte, error)
+	Ctx   context.Context
+}
+
+// maxExternalRefs bounds the files fetched to bundle one multi-file spec.
+const maxExternalRefs = 64
 
 // Normalize parses raw and returns its canonical form. ignore is a list of
 // JSONPath-subset expressions ($.a.b, * as key wildcard) removed before hashing.
 func Normalize(raw []byte, ignore []string) (*Result, error) {
+	return NormalizeWith(raw, Options{Ignore: ignore})
+}
+
+// IsSpec reports cheaply whether raw looks like an OpenAPI / Swagger document
+// (without resolving references).
+func IsSpec(raw []byte) bool {
+	t := bytes.TrimSpace(raw)
+	if len(t) == 0 || t[0] == '<' {
+		return false
+	}
+	doc, err := decode(t)
+	if err != nil {
+		return false
+	}
+	root, ok := doc.(map[string]any)
+	return ok && (strings.HasPrefix(str(root["openapi"]), "3") || strings.HasPrefix(str(root["swagger"]), "2"))
+}
+
+// NormalizeWith is Normalize with external $ref bundling.
+func NormalizeWith(raw []byte, o Options) (*Result, error) {
+	ignore := o.Ignore
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) > 0 && trimmed[0] == '<' {
 		return nil, fmt.Errorf("%w : page HTML reçue (si c'est une page Swagger-UI / Redoc, déclarer source.type en conséquence)", ErrNotSpec)
@@ -63,6 +101,15 @@ func Normalize(raw []byte, ignore []string) (*Result, error) {
 		res.Format = "openapi-3.0"
 	default:
 		return nil, fmt.Errorf("%w : ni champ \"openapi: 3.x\" ni \"swagger: 2.0\"", ErrNotSpec)
+	}
+	if hasExternalRef(root) {
+		if res.Format == "swagger-2.0" {
+			return nil, errors.New("références $ref externes non supportées pour Swagger 2.0 (seulement OpenAPI 3)")
+		}
+		if root, err = bundle(root, o); err != nil {
+			return nil, err
+		}
+		res.Bundled = true
 	}
 
 	for _, expr := range ignore {
@@ -212,4 +259,72 @@ func removePath(node any, path []string) {
 func str(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func hasExternalRef(n any) bool {
+	switch t := n.(type) {
+	case map[string]any:
+		for k, v := range t {
+			if ref, ok := v.(string); ok && k == "$ref" && !strings.HasPrefix(ref, "#") {
+				return true
+			}
+			if hasExternalRef(v) {
+				return true
+			}
+		}
+	case []any:
+		for _, v := range t {
+			if hasExternalRef(v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bundle resolves external $refs and internalizes them into components, so that the
+// canonical document is self-contained (and stable for hashing and diffing).
+func bundle(root map[string]any, o Options) (map[string]any, error) {
+	if o.Fetch == nil || o.Location == "" {
+		return nil, errors.New("la spec contient des $ref externes : leur résolution nécessite l'URL d'origine")
+	}
+	ctx := o.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	loc, err := url.Parse(o.Location)
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(root)
+	if err != nil {
+		return nil, err
+	}
+	fetched := 0
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+	// SECURITY: a custom reader bypasses kin-openapi's own checks; only http(s) through
+	// the API's fetch client (deny/allow lists, origin-bound credentials), bounded.
+	loader.ReadFromURIFunc = func(_ *openapi3.Loader, u *url.URL) ([]byte, error) {
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("$ref externe %q refusée : seules les URLs http(s) sont autorisées", u)
+		}
+		if fetched++; fetched > maxExternalRefs {
+			return nil, fmt.Errorf("plus de %d fichiers référencés : abandon", maxExternalRefs)
+		}
+		return o.Fetch(ctx, u.String())
+	}
+	doc, err := loader.LoadFromDataWithPath(data, loc)
+	if err != nil {
+		return nil, fmt.Errorf("résolution des $ref externes : %w", err)
+	}
+	doc.InternalizeRefs(ctx, nil)
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var out map[string]any
+	return out, dec.Decode(&out)
 }
