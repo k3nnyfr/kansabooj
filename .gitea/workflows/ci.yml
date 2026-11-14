@@ -130,31 +130,32 @@ jobs:
   image:
     runs-on: ubuntu-latest
     needs: [backend, frontend, config-and-deploy]
+    # Image Debian trixie : son paquet docker-cli (26.x, API 1.45) est accepté par les démons Docker 29+,
+    # qui refusent les clients sous l'API 1.44 (celui de bookworm est en 1.41).
+    container:
+      image: docker.io/library/node:24-trixie-slim
     env:
       REGISTRY: ${{ vars.REGISTRY || 'git.k3nny.fr' }}
       TRIVY_IMAGE: docker.io/aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: client Docker
-        # Paquet Debian docker.io : seul son client sert (aucun démon n'est lancé dans le job), il pilote le
-        # démon de l'hôte par le socket. download.docker.com n'est pas joignable depuis tous les runners.
+        # Client seul (+ plugin buildx pour BuildKit), il pilote le démon de l'hôte par le socket monté par act_runner.
         run: |
           if ! command -v docker >/dev/null; then
-            SUDO=$(command -v sudo || true)
-            $SUDO apt-get update -qq
-            DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends docker.io >/dev/null
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates docker-cli docker-buildx >/dev/null
           fi
-          docker version --format 'client {{.Client.Version}} / démon {{.Server.Version}}' \
+          docker version --format 'client {{.Client.Version}} / démon {{.Server.Version}} (API {{.Server.APIVersion}})' \
             || { echo "::error::démon Docker injoignable : le runner doit monter /var/run/docker.sock"; exit 1; }
       - name: build
         run: |
-          VERSION=$(git describe --tags --always --dirty)
+          # sans git dans le job (checkout par archive) : le tag, sinon le commit court
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then VERSION="${GITHUB_REF_NAME}"; else VERSION="${GITHUB_SHA::7}"; fi
           IMAGE="$REGISTRY/${GITHUB_REPOSITORY,,}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          DOCKER_BUILDKIT=1 docker build -f Containerfile --build-arg VERSION="$VERSION" -t "$IMAGE:$VERSION" .
+          docker build -f Containerfile --build-arg VERSION="$VERSION" -t "$IMAGE:$VERSION" .
       - name: scan (Trivy)
         # Trivy tourne à côté, sur le même démon : il lit l'image par le socket. Base de vulnérabilités
         # gardée dans un volume pour ne pas la retélécharger à chaque run.
