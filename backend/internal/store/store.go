@@ -339,6 +339,7 @@ type CheckRecord struct {
 	StartedAt  time.Time
 	Duration   time.Duration
 	Trigger    string // schedule | manual | startup
+	Actor      string // who asked for a manual check (SSO user, token:<name>, anonymous, cli); empty otherwise
 	Status     string // unchanged | changed | error
 	ErrorKind  string
 	HTTPStatus int
@@ -482,9 +483,9 @@ FROM changes WHERE api_id = ? ORDER BY detected_at DESC, id DESC LIMIT ?`, apiID
 }
 
 func insertCheck(ctx context.Context, tx *rtx, c CheckRecord, snapID *int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO checks (api_id, started_at, duration_ms, trigger, status, error_kind, http_status, error, snapshot_id)
-VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?)`,
-		c.APIID, c.StartedAt, c.Duration.Milliseconds(), c.Trigger, c.Status, c.ErrorKind, c.HTTPStatus, c.Error, snapID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO checks (api_id, started_at, duration_ms, trigger, status, error_kind, http_status, error, snapshot_id, actor)
+VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, NULLIF(?, ''))`,
+		c.APIID, c.StartedAt, c.Duration.Milliseconds(), c.Trigger, c.Status, c.ErrorKind, c.HTTPStatus, c.Error, snapID, c.Actor)
 	return err
 }
 

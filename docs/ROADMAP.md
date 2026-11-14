@@ -73,6 +73,13 @@
       `?doc=`) : chargé à la demande, thème de l'interface (clair et sombre), en lecture seule (« Try it out » désactivé)
 - [x] Page élargie (1600 px) : les tags de la liste tiennent sur une ligne
 
+## v0.9 — Journal et thème ✅ 2026-11-14
+- [x] Onglet « Journal » : checks manuels (auteur enregistré, migration 0006) et planifiés, acquittements,
+      notifications ; filtres par type et par API, pagination qui ne sépare pas les entrées simultanées.
+      Lu dans les tables existantes (`GET /api/journal`), donc soumis à la même rétention que les checks
+- [x] Bouton de thème clair / sombre (suit le système tant qu'aucun choix n'est mémorisé)
+- [x] Captures du README en 1600 px, avec le journal et le thème sombre
+
 ## Plus tard (selon retours)
 - Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)

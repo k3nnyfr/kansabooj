@@ -20,26 +20,25 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #12151b;
-    --surface: #1a1e26;
-    --text: #e4e7ec;
-    --muted: #98a2b3;
-    --border: #2b313c;
-    --accent: #6d8ff0;
-    --err: #ff7b6f;
-    --err-bg: #3a1d1b;
-    --warn: #f2b84b;
-    --warn-bg: #3a2c12;
-    --info: #8fb6e6;
-    --info-bg: #1b2a3c;
-    --ok: #5fd193;
-    --ok-bg: #16301f;
-    --pending: #6cb0ff;
-    --pending-bg: #142b4a;
-    color-scheme: dark;
-  }
+/* Thème : data-theme sur <html>, posé avant le premier rendu par index.html (choix mémorisé, sinon système) */
+:root[data-theme='dark'] {
+  --bg: #12151b;
+  --surface: #1a1e26;
+  --text: #e4e7ec;
+  --muted: #98a2b3;
+  --border: #2b313c;
+  --accent: #6d8ff0;
+  --err: #ff7b6f;
+  --err-bg: #3a1d1b;
+  --warn: #f2b84b;
+  --warn-bg: #3a2c12;
+  --info: #8fb6e6;
+  --info-bg: #1b2a3c;
+  --ok: #5fd193;
+  --ok-bg: #16301f;
+  --pending: #6cb0ff;
+  --pending-bg: #142b4a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -273,3 +272,18 @@ button.tag:hover { color: var(--accent); border-color: var(--accent); }
 }
 .apidoc-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
 .apidoc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .25rem .9rem .9rem; }
+
+/* Bouton de thème (barre du haut) */
+.btn-icon { display: inline-grid; place-items: center; padding: .35rem .5rem; line-height: 0; }
+.btn-icon svg { width: 18px; height: 18px; }
+
+/* Journal */
+.journal-intro { margin: -.25rem 0 .5rem; }
+.journal-table { table-layout: fixed; min-width: 56rem; }
+.journal-table col.c-when { width: 11.5rem; }
+.journal-table col.c-kind { width: 10rem; }
+.journal-table col.c-api { width: 16rem; }
+.journal-table col.c-by { width: 12rem; }
+.journal-table td { vertical-align: top; }
+.journal-result { display: inline; }
+.journal-error { font-family: var(--mono); word-break: break-word; }

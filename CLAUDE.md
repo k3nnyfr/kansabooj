@@ -30,7 +30,8 @@ backend/
   internal/normalize/   parse → v2→v3 → bundle $ref externes → ignore rules → JSON canonique → sha256 ; html.go : mode dégradé
   internal/diff/        wrapper oasdiff → []ChangeItem (+ calcul in_scope vs exposed_operations) ; libellés en/fr
                         (locale/fr.yaml) ; lines.go : diff ligne à ligne borné (vue côte à côte)
-  internal/store/       accès base (PostgreSQL / SQLite, dialect.go), migrations, blobs, verrous distribués
+  internal/store/       accès base (PostgreSQL / SQLite, dialect.go), migrations, blobs, verrous distribués ;
+                        journal.go : journal des actions lu dans checks / changes / notifications
   internal/store/storetest/  base jetable pour les tests (SQLite, ou PostgreSQL si KANSABOOJ_TEST_POSTGRES)
   internal/monitor/     orchestration d'un check : fetch → normalize → diff → store (utilisé par CLI et scheduler)
   internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine), reload de config
@@ -42,8 +43,9 @@ backend/
                         openapi.yaml embarqué, front embarqué (web/dist, sinon web/placeholder.html), /healthz /readyz
   internal/token/       jetons d'API (kbj_…), seul le hash sha256 est configuré
 frontend/src/
-  pages/                ApiList, ApiDetail (timeline + détail des changements), StatusPage
-  components/           badges, bouton de vérification (largeur fixe), encart d’erreur ; filters.tsx : facettes multi-choix, bascule, case à 3 états
+  pages/                ApiList, ApiDetail (timeline + détail des changements + documentation Swagger UI), Journal, StatusPage
+  components/           badges, bouton de vérification (largeur fixe), encart d’erreur ; filters.tsx : facettes multi-choix, bascule, case à 3 états ;
+                        ApiDoc + SwaggerView (chargé à la demande, thème dans swagger.css)
   api/client.ts         client typé de l'API REST — à garder aligné avec internal/httpapi et internal/store
   i18n.tsx              catalogue FR/EN du front + formatage des dates (Intl)
 config/apis.schema.json JSON Schema de la config (autocomplétion IDE) — à tenir à jour avec internal/config

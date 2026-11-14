@@ -1,6 +1,6 @@
 # Kansabooj
 
-![version](https://img.shields.io/badge/version-v0.8-blue.svg)
+![version](https://img.shields.io/badge/version-v0.9-blue.svg)
 
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
@@ -28,7 +28,8 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Accès authentifiés** | Clé d'API, basic, bearer, OAuth2 *client credentials*, mTLS ; les identifiants ne partent jamais vers un autre hôte que celui configuré. |
 | **As-code** | La configuration est un fichier YAML versionné (avec JSON Schema pour l'autocomplétion). Chaque équipe peut maintenir son propre fragment, validé en CI par le serveur. |
 | **Contrôle de contrat en CI** | `kansabooj diff` compare la spec produite par un build à la version connue, et échoue sur une rupture dans le périmètre réexposé. |
-| **Interface** | Français ou anglais, y compris le détail de chaque changement ; filtres combinables par état, groupes et tags (sélection multiple), vue alphabétique ou par groupe, colonnes triables et en-têtes fixes, vérification à la demande, actions groupées (vérifier, marquer comme vu), page de statut. |
+| **Journal** | Checks manuels (avec leur auteur) et planifiés, acquittements, notifications envoyées ou en échec ; filtrable par type et par API. |
+| **Interface** | Français ou anglais, y compris le détail de chaque changement ; thème clair ou sombre ; filtres combinables par état, groupes et tags (sélection multiple), vue alphabétique ou par groupe, colonnes triables et en-têtes fixes, vérification à la demande, actions groupées (vérifier, marquer comme vu), page de statut. |
 | **Exploitation** | Métriques Prometheus, rechargement de la configuration à chaud, plusieurs réplicas avec élection d'un leader, image sans état en lecture seule. |
 
 ## Aperçu
@@ -43,6 +44,8 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Comparaison** : deux versions au choix, changements classés et diff côte à côte | **Statut** : rôle de l'instance, APIs en échec et prochains checks |
 | ![Documentation Swagger UI de Kdo+ (Swagger 2.0), thème clair](docs/images/api-doc.png) | ![La même documentation en thème sombre](docs/images/api-doc-dark.png) |
 | **Documentation** : rendu Swagger UI de n'importe quelle version conservée, en lecture seule | … aux couleurs de l'interface, thème sombre compris |
+| ![Journal : checks planifiés et manuels, acquittement, notifications envoyées ou en échec](docs/images/journal.png) | ![Liste des APIs en thème sombre](docs/images/apis-dark.png) |
+| **Journal** : qui a vérifié ou acquitté quoi, et ce que sont devenues les notifications | **Thème sombre** : suit le système, ou choisi avec le bouton en haut à droite |
 
 Les captures sont faites sur des APIs fictives servies en local (`scripts/screenshots/`), régénérables avec `task screenshots`.
 

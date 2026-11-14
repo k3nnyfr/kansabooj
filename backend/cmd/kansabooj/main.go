@@ -250,7 +250,7 @@ func runCheck(ctx context.Context, args []string) int {
 			failed++
 			continue
 		}
-		o, err := m.Check(ctx, id, "manual", *dry)
+		o, err := m.Check(monitor.WithActor(ctx, "cli"), id, "manual", *dry)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s : erreur interne : %v\n", id, err)
 			failed++

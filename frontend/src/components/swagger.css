@@ -138,9 +138,8 @@
 .kb-swagger .swagger-ui :is(.prop-format, .model .property.primitive, .model-hint) { color: var(--muted); }
 .kb-swagger .swagger-ui .model .deprecated { color: var(--muted); }
 .kb-swagger .swagger-ui .model span.model-toggle { filter: none; }
-@media (prefers-color-scheme: dark) {
-  /* Flèches des modèles : images SVG noires de Swagger UI */
-  .kb-swagger .swagger-ui :is(.model-toggle, .model-box-control .model-toggle)::after { filter: invert(1); }
+:root[data-theme='dark'] .kb-swagger .swagger-ui :is(.model-toggle, .model-box-control .model-toggle)::after {
+  filter: invert(1); /* flèches des modèles : images SVG noires de Swagger UI */
 }
 
 /* Erreurs de la spec relevées par Swagger UI */

@@ -24,6 +24,7 @@ tags:
   - name: changes
   - name: config
   - name: service
+  - name: journal
 paths:
   /healthz:
     get:
@@ -145,6 +146,32 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/Comparison" } } }
         "400": { description: Paramètres invalides, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/journal:
+    get:
+      tags: [journal]
+      summary: Journal des actions (checks manuels et planifiés, acquittements, notifications), du plus récent au plus ancien
+      description: >-
+        Lu dans l'historique des checks, des évolutions et des notifications : il suit leur rétention
+        (server.check_retention pour les checks). Une page ne sépare jamais des entrées de même horodatage.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string, format: date-time }, description: "pagination : next de la page précédente (exclu)" }
+        - name: kind
+          in: query
+          description: "types retenus, séparés par des virgules (défaut : tous)"
+          schema: { type: string, example: "check_manual,ack" }
+        - { name: api, in: query, schema: { type: string }, description: "id d'API" }
+      responses:
+        "200":
+          description: Page du journal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries: { type: array, items: { $ref: "#/components/schemas/JournalEntry" } }
+                  next: { type: string, format: date-time, description: "curseur de la page suivante ; absent s'il n'y en a pas" }
+        "400": { description: Paramètres invalides, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /api/apis/{id}/check:
     parameters: [ { $ref: "#/components/parameters/ApiId" } ]
     post:
@@ -303,6 +330,24 @@ components:
         summary:
           type: object
           properties: { errors: { type: integer }, warns: { type: integer }, infos: { type: integer }, in_scope: { type: integer } }
+    JournalEntry:
+      type: object
+      properties:
+        kind: { type: string, enum: [check, ack, notification] }
+        at: { type: string, format: date-time }
+        api_id: { type: string }
+        api_name: { type: string }
+        actor: { type: string, description: "auteur d'un check manuel ou d'un acquittement (SSO, token:<nom>, anonymous, cli)" }
+        trigger: { type: string, enum: [manual, schedule, startup] }
+        status: { type: string, description: "check : unchanged | changed | error ; ack : acknowledged ; notification : sent | failed | pending | queued | digested" }
+        duration_ms: { type: integer }
+        error_kind: { type: string }
+        error: { type: string }
+        change_id: { type: integer }
+        version: { type: string, description: "acquittement : version à laquelle l'évolution a mené" }
+        notifier: { type: string }
+        notification_kind: { type: string }
+        attempts: { type: integer }
     TimelineEntry:
       type: object
       properties:

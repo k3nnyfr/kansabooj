@@ -67,6 +67,7 @@ func (s *Server) routes() []route {
 		{"GET", "/api/apis/{id}/timeline", "read", s.timeline},
 		{"GET", "/api/apis/{id}/snapshots", "read", s.snapshots},
 		{"GET", "/api/apis/{id}/compare", "read", s.compare},
+		{"GET", "/api/journal", "read", s.journal},
 		{"POST", "/api/apis/{id}/check", "check", s.check},
 		{"POST", "/api/apis/{id}/ack", "ack", s.ackAll},
 		{"GET", "/api/changes/{id}", "read", s.getChange},
@@ -193,6 +194,37 @@ func (s *Server) timeline(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tl)
 }
 
+func (s *Server) journal(w http.ResponseWriter, r *http.Request) {
+	q := store.JournalQuery{Limit: intParam(r, "limit", 50, 1, 200), APIID: r.URL.Query().Get("api")}
+	if v := r.URL.Query().Get("before"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "before : date RFC 3339 attendue (valeur next de la page précédente)")
+			return
+		}
+		q.Before = t
+	}
+	if v := r.URL.Query().Get("kind"); v != "" {
+		for _, k := range strings.Split(v, ",") {
+			if !slices.Contains(store.JournalKinds, k) {
+				writeErr(w, http.StatusBadRequest, "kind : valeurs possibles "+strings.Join(store.JournalKinds, ", "))
+				return
+			}
+			q.Kinds = append(q.Kinds, k)
+		}
+	}
+	entries, next, err := s.store.Journal(r.Context(), q)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	res := map[string]any{"entries": entries}
+	if !next.IsZero() {
+		res["next"] = next.UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) getChange(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -236,6 +268,9 @@ func (s *Server) ackAll(w http.ResponseWriter, r *http.Request) {
 func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
+	if id, ok := r.Context().Value(identityKey{}).(*identity); ok {
+		ctx = monitor.WithActor(ctx, id.name)
+	}
 	o, err := s.rt.TriggerCheck(ctx, r.PathValue("id"))
 	switch {
 	case errors.Is(err, scheduler.ErrUnknownAPI):

@@ -79,6 +79,8 @@ con = sqlite3.connect(db)
 con.execute("update snapshots set fetched_at=? where id>?", (ts, s))
 con.execute("update changes set detected_at=? where id>?", (ts, c))
 con.execute("update checks set started_at=? where id>?", (ts, k))
+# Les passes jouent le rôle du planificateur (la CLI enregistre des checks manuels faits par « cli »)
+con.execute("update checks set trigger='schedule', actor=NULL where id>?", (k,))
 con.execute("update apis set last_checked_at=?", (ts,))
 con.commit()
 EOF
@@ -118,6 +120,24 @@ publish payflow/v3.yaml $PAYFLOW
 rm -f "$WWW/$ADRESSES"
 pass 0 "$(date -u -d '-25 min' +%H:%M)"
 
+# Notifications du journal : aucun webhook n'existe ici, on inscrit leur résultat comme l'aurait fait le dispatcher
+# (évolutions de PayFlow envoyées sur le chat de l'équipe ; Référentiel clients en échec côté Teams)
+python3 - "$DB" <<'EOF'
+import sqlite3, sys, datetime as dt
+con = sqlite3.connect(sys.argv[1])
+def later(ts, s):
+    t = dt.datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S") + dt.timedelta(seconds=s)
+    return t.strftime("%Y-%m-%d %H:%M:%S.000000000 +0000 UTC")
+for cid, api, ts in con.execute("select id, api_id, detected_at from changes where from_snapshot_id is not null and api_id in ('payflow', 'referentiel-clients')").fetchall():
+    if api == "payflow":
+        row = ("chat-paiement", "sent", 1, None, later(ts, 2))
+    else:
+        row = ("teams-socle", "failed", 5, "HTTP 503 du webhook Teams après 5 tentatives", None)
+    con.execute("""insert into notifications (change_id, api_id, notifier, kind, status, attempts, last_error, created_at, sent_at, payload, content_type)
+                   values (?, ?, ?, 'change', ?, ?, ?, ?, ?, '{}', 'application/json')""", (cid, api, row[0], row[1], row[2], row[3], later(ts, 2), row[4]))
+con.commit()
+EOF
+
 # Nom d'instance affiché par la page Statut : un nom de pod fictif plutôt que celui de la machine
 # (espace de noms UTS sans root ; sinon, le vrai nom d'hôte apparaîtra dans status.png).
 SERVE=("$BIN" serve --config "$CONFIG" --db "$DB" --listen "127.0.0.1:$UI_PORT")
@@ -138,10 +158,12 @@ print(sqlite3.connect(sys.argv[1]).execute(
 EOF
 )
 curl -sf -X POST -H 'X-Forwarded-User: marie.dupont' "http://127.0.0.1:$UI_PORT/api/changes/$id/ack" >/dev/null
+# … et elle a revérifié Kdo+ à la main (check manuel, visible dans le journal)
+curl -sf -X POST -H 'X-Forwarded-User: marie.dupont' "http://127.0.0.1:$UI_PORT/api/apis/kdo-plus/check" >/dev/null
 
 shot() { # shot <fichier> <chemin> <hauteur> [options Chromium…]
   "$CHROME" --headless --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --lang=fr-FR "${@:4}" \
-    --window-size="1280,$3" --virtual-time-budget=5000 --screenshot="$OUT/$1" \
+    --window-size="1600,$3" --virtual-time-budget=5000 --screenshot="$OUT/$1" \
     "http://127.0.0.1:$UI_PORT$2" >/dev/null 2>&1
   echo "  docs/images/$1"
 }
@@ -153,6 +175,8 @@ shot api-discovery.png "/apis/colis-express" 630
 shot api-html.png "/apis/meteo-pro" 735
 shot status.png "/status" 480
 shot compare.png "/apis/payflow/compare" 1100
+shot journal.png "/journal" 900
+shot apis-dark.png "/" 790 --blink-settings=preferredColorScheme=0
 # Documentation de Kdo+ (Swagger 2.0, timeline courte : la section est visible sans défiler), clair puis sombre
 doc=$(python3 - "$DB" <<'EOF'
 import sqlite3, sys

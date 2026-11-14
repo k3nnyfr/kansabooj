@@ -71,6 +71,31 @@ export interface TimelineEntry {
   acknowledged_by?: string
 }
 
+export type JournalKind = 'check_manual' | 'check_scheduled' | 'ack' | 'notification'
+
+export interface JournalEntry {
+  kind: 'check' | 'ack' | 'notification'
+  at: string
+  api_id: string
+  api_name: string
+  actor?: string
+  trigger?: 'manual' | 'schedule' | 'startup'
+  status: string // check: unchanged | changed | error; ack: acknowledged; notification: sent | failed | pending | queued | digested
+  duration_ms?: number
+  error_kind?: string
+  error?: string
+  change_id?: number
+  version?: string
+  notifier?: string
+  notification_kind?: string
+  attempts?: number
+}
+
+export interface JournalPage {
+  entries: JournalEntry[]
+  next?: string
+}
+
 export interface ChangeItem {
   rule_id: string
   level: Level
@@ -180,5 +205,12 @@ export const api = {
   snapshots: (id: string) => request<Snapshot[]>('GET', `/api/apis/${enc(id)}/snapshots`),
   compare: (id: string, from: number, to: number) =>
     request<Comparison>('GET', `/api/apis/${enc(id)}/compare?from=${from}&to=${to}`),
+  journal: (q: { before?: string; kinds: JournalKind[]; api?: string }) => {
+    const p = new URLSearchParams({ limit: '50' })
+    if (q.before) p.set('before', q.before)
+    if (q.kinds.length) p.set('kind', q.kinds.join(','))
+    if (q.api) p.set('api', q.api)
+    return request<JournalPage>('GET', `/api/journal?${p}`)
+  },
   specUrl: (snapshotId: number, form: 'raw' | 'normalized') => `/api/snapshots/${snapshotId}/spec?form=${form}`,
 }

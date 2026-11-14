@@ -56,6 +56,19 @@ type Outcome struct {
 	Duration          time.Duration
 }
 
+type actorKey struct{}
+
+// WithActor marks ctx as carrying a check asked by name (SSO user, token:<name>, anonymous, cli):
+// the check log records it, for the journal.
+func WithActor(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, actorKey{}, name)
+}
+
+func actorOf(ctx context.Context) string {
+	name, _ := ctx.Value(actorKey{}).(string)
+	return name
+}
+
 // Check runs one check. With dryRun nothing is written and conditional requests
 // are disabled so the document is always downloaded and analyzed.
 func (m *Monitor) Check(ctx context.Context, apiID, trigger string, dryRun bool) (*Outcome, error) {
@@ -65,7 +78,7 @@ func (m *Monitor) Check(ctx context.Context, apiID, trigger string, dryRun bool)
 	}
 	start := time.Now().UTC()
 	out := &Outcome{APIID: apiID}
-	rec := store.CheckRecord{APIID: apiID, StartedAt: start, Trigger: trigger}
+	rec := store.CheckRecord{APIID: apiID, StartedAt: start, Trigger: trigger, Actor: actorOf(ctx)}
 
 	var state *store.APIState
 	if m.store != nil {
