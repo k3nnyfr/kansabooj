@@ -1,12 +1,12 @@
 # Kansabooj
 
-![version](https://img.shields.io/badge/version-v0.6-blue.svg)
+![version](https://img.shields.io/badge/version-v0.7-blue.svg)
 
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
-**[Architecture](docs/ARCHITECTURE.md)** · **[Dépôt](https://git.k3nny.fr/k3nny/kansabooj)** · **[Feuille de route](docs/ROADMAP.md)** · **[Décisions (ADR)](docs/adr/)** · **[API REST](backend/internal/httpapi/openapi.yaml)** · Licence [MIT](LICENSE)
+**[Démo en ligne](https://kansabooj.k3nny.fr/)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Dépôt](https://git.k3nny.fr/k3nny/kansabooj)** · **[Feuille de route](docs/ROADMAP.md)** · **[Décisions (ADR)](docs/adr/)** · **[API REST](backend/internal/httpapi/openapi.yaml)** · Licence [MIT](LICENSE)
 
-![Liste des APIs surveillées : état, version, dernier check, évolutions non vues, filtres par état, groupe et tag](docs/images/apis.png)
+![Liste des APIs surveillées : état, version, dernier check, changements en attente, filtres par état, groupes et tags, colonnes triables](docs/images/apis.png)
 
 ## Pourquoi
 
@@ -27,7 +27,7 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Accès authentifiés** | Clé d'API, basic, bearer, OAuth2 *client credentials*, mTLS ; les identifiants ne partent jamais vers un autre hôte que celui configuré. |
 | **As-code** | La configuration est un fichier YAML versionné (avec JSON Schema pour l'autocomplétion). Chaque équipe peut maintenir son propre fragment, validé en CI par le serveur. |
 | **Contrôle de contrat en CI** | `kansabooj diff` compare la spec produite par un build à la version connue, et échoue sur une rupture dans le périmètre réexposé. |
-| **Interface** | Français ou anglais, y compris le détail de chaque changement ; filtres par état, groupe et tag, check à la demande, marquage « vu », page de statut. |
+| **Interface** | Français ou anglais, y compris le détail de chaque changement ; filtres combinables par état, groupes et tags (sélection multiple), vue alphabétique ou par groupe, colonnes triables et en-têtes fixes, vérification à la demande, actions groupées (vérifier, marquer comme vu), page de statut. |
 | **Exploitation** | Métriques Prometheus, rechargement de la configuration à chaud, plusieurs réplicas avec élection d'un leader, image sans état en lecture seule. |
 
 ## Aperçu

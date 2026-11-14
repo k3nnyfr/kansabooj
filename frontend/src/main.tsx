@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { StrictMode } from 'react'
+import { StrictMode, useEffect, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { api } from './api/client'
@@ -15,9 +15,18 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, sta
 function Shell() {
   const { t, lang, setLang } = useI18n()
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, staleTime: Infinity })
+  // Sticky table headers stop right below the top bar, whose height depends on wrapping.
+  const bar = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = bar.current
+    if (!el) return
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${el.offsetHeight}px`))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   return (
     <>
-      <header className="topbar">
+      <header className="topbar" ref={bar}>
         <NavLink to="/" className="brand" end>
           <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden>
             <rect width="32" height="32" rx="7" fill="var(--accent)" />

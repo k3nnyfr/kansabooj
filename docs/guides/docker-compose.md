@@ -33,7 +33,7 @@ vérifie chaque API dans les minutes qui suivent (décalage aléatoire pour ne p
 ```yaml
 # compose.yaml (extrait)
   kansabooj:
-    image: git.k3nny.fr/k3nny/kansabooj:${KANSABOOJ_VERSION:-v0.6.1}
+    image: git.k3nny.fr/k3nny/kansabooj:${KANSABOOJ_VERSION:-v0.7.0}
     env_file: [.env]
     environment:
       KANSABOOJ_CONFIG: /etc/kansabooj/apis.yml

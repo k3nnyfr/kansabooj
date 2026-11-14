@@ -62,6 +62,12 @@
 - [x] Libellés des changements en français (catalogue de 825 messages oasdiff, couverture vérifiée par un test)
 - [x] `$ref` externes en Swagger 2.0 ; `kansabooj diff` sur des specs multi-fichiers locales
 
+## v0.7 — Ergonomie de la liste ✅ 2026-11-14
+- [x] Filtres groupes et tags unifiés, sélection multiple (OU dans une facette, ET entre facettes), compteurs par option
+- [x] Bascule « Alphabétique / Groupes », tri sur toutes les colonnes, en-têtes fixes au défilement
+- [x] Actions groupées : vérifier maintenant, marquer comme vu (lignes affichées seulement, 4 en parallèle)
+- [x] « Changements en attente » (bleu), bouton « Vérifier maintenant » et colonnes à largeur fixe
+
 ## Plus tard (selon retours)
 - Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)

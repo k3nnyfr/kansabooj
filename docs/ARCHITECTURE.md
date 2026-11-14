@@ -226,7 +226,7 @@ Voir `backend/internal/store/migrations/{postgres,sqlite}/`. En résumé :
 
 ## 7. Front
 
-- **Liste** : nom, propriétaire, version courante, dernier check, badge (`à jour` / `N changements non vus` / `breaking` / `erreur`), filtre par équipe/statut.
+- **Liste** : nom, propriétaire, version courante, dernier check, badge (`à jour` / `N changements en attente` / `cassant` / `erreur`), filtres par état, groupes et tags (multi-sélection : OU dans une facette, ET entre facettes, état dans l'URL), vue alphabétique ou par groupe, tri sur toutes les colonnes, actions groupées sur les lignes affichées (vérifier maintenant, marquer comme vu).
 - **Timeline** d'une API : une carte par changement (date, version from → to, compteurs ERR/WARN/INFO, hors-périmètre grisé), dépliable en liste de changements, lien « voir le diff brut » (vue split des specs normalisées).
 - **Diff libre** entre deux versions choisies.
 - **Statut** : APIs en erreur / stale, dernière exécution du scheduler.

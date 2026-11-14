@@ -162,7 +162,7 @@ function TimelineCard({ apiID, entry: e, focused }: { apiID: string; entry: Time
     : t('change.sameVersion', { v: e.version_to || 'n/a' })
 
   return (
-    <li ref={ref} className={`tl-item ${unseen ? 'unseen' : ''} ${e.in_scope_errors > 0 ? 'breaking' : ''} ${focused ? 'focused' : ''}`}>
+    <li ref={ref} className={`tl-item ${unseen ? 'pending' : ''} ${e.in_scope_errors > 0 ? 'breaking' : ''} ${focused ? 'focused' : ''}`}>
       <div className="tl-marker" aria-hidden />
       <div className="tl-card">
         <button className="tl-head" onClick={() => setOpen(!open)} aria-expanded={open} disabled={e.first_capture}>
@@ -170,7 +170,7 @@ function TimelineCard({ apiID, entry: e, focused }: { apiID: string; entry: Time
           <span className="tl-version">{version}</span>
           {!e.first_capture && <Counts errors={e.errors} warns={e.warns} infos={e.infos} />}
           {!e.semantic && !e.first_capture && <span className="badge level-warn">{t('change.degraded')}</span>}
-          {unseen && <span className="badge unseen">{t('change.new')}</span>}
+          {unseen && <span className="badge pending">{t('change.new')}</span>}
         </button>
         {open && !e.first_capture && (
           <div className="tl-body">

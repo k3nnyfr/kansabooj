@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type ApiStatus, type CheckResult, type Level } from '../api/client'
 import { useI18n } from '../i18n'
 
@@ -52,20 +52,28 @@ export function ErrorHint({ kind, detail, consecutive }: { kind?: string; detail
   )
 }
 
-/** Button triggering a manual check; invalidates cached data afterwards. */
+/** Mutation key shared by every manual check, so that a row shows "Verifying…" whether the
+ * check came from its own button or from a bulk action (variables = API id). */
+export const checkKey = ['check']
+
+/** Button triggering a manual check; invalidates cached data afterwards. Both labels are
+ * laid out in the same grid cell, so the button keeps its width while the check runs. */
 export function CheckButton({ id, onResult }: { id: string; onResult?: (r: CheckResult) => void }) {
   const { t } = useI18n()
   const qc = useQueryClient()
+  const running = useIsMutating({ mutationKey: checkKey, predicate: (m) => m.state.variables === id }) > 0
   const m = useMutation({
-    mutationFn: () => api.check(id),
+    mutationKey: checkKey,
+    mutationFn: (apiID: string) => api.check(apiID),
     onSuccess: (r) => {
       onResult?.(r)
       qc.invalidateQueries()
     },
   })
   return (
-    <button className="btn" onClick={() => m.mutate()} disabled={m.isPending}>
-      {m.isPending ? t('action.checking') : t('action.check')}
+    <button className="btn btn-stable" onClick={() => m.mutate(id)} disabled={running} aria-busy={running}>
+      <span className={running ? 'off' : ''}>{t('action.check')}</span>
+      <span className={running ? '' : 'off'}>{t('action.checking')}</span>
     </button>
   )
 }

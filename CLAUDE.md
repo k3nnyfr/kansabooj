@@ -43,7 +43,7 @@ backend/
   internal/token/       jetons d'API (kbj_…), seul le hash sha256 est configuré
 frontend/src/
   pages/                ApiList, ApiDetail (timeline + détail des changements), StatusPage
-  components/           badges, bouton de check, encart d'erreur
+  components/           badges, bouton de vérification (largeur fixe), encart d’erreur ; filters.tsx : facettes multi-choix, bascule, case à 3 états
   api/client.ts         client typé de l'API REST — à garder aligné avec internal/httpapi et internal/store
   i18n.tsx              catalogue FR/EN du front + formatage des dates (Intl)
 config/apis.schema.json JSON Schema de la config (autocomplétion IDE) — à tenir à jour avec internal/config
