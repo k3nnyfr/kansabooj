@@ -125,21 +125,31 @@ jobs:
             go run sigs.k8s.io/kustomize/kustomize/v5@v5.5.0 build deploy/kubernetes/overlays/$o > /dev/null
           done
 
+  # Construit, scanne et publie l'image avec le démon Docker de l'hôte (act_runner monte /var/run/docker.sock).
+  # Sans action tierce : client Docker statique + Trivy en conteneur, versions et empreinte épinglées.
   image:
     runs-on: ubuntu-latest
     needs: [backend, frontend, config-and-deploy]
     env:
       REGISTRY: ${{ vars.REGISTRY || 'git.k3nny.fr' }}
+      DOCKER_CLI_VERSION: 27.5.1
+      TRIVY_IMAGE: docker.io/aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: CA système
+      - name: client Docker
         run: |
-          if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
+          if ! command -v docker >/dev/null; then
             SUDO=$(command -v sudo || true)
-            $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ca-certificates
+            if ! command -v curl >/dev/null || [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
+              $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ca-certificates curl
+            fi
+            curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+              | $SUDO tar -xz -C /usr/local/bin --strip-components=1 docker/docker
           fi
+          docker version --format 'client {{.Client.Version}} / démon {{.Server.Version}}' \
+            || { echo "::error::démon Docker injoignable : le runner doit monter /var/run/docker.sock"; exit 1; }
       - name: build
         run: |
           VERSION=$(git describe --tags --always --dirty)
@@ -148,12 +158,11 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           docker build -f Containerfile --build-arg VERSION="$VERSION" -t "$IMAGE:$VERSION" .
       - name: scan (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.IMAGE }}:${{ env.VERSION }}
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        # Trivy tourne à côté, sur le même démon : il lit l'image par le socket. Base de vulnérabilités
+        # gardée dans un volume pour ne pas la retélécharger à chaque run.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v kansabooj-trivy-cache:/root/.cache/trivy \
+            "$TRIVY_IMAGE" image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress "$IMAGE:$VERSION"
       - name: push (main et tags)
         if: github.event_name == 'push'
         run: |
@@ -164,3 +173,4 @@ jobs:
           else
             docker tag "$IMAGE:$VERSION" "$IMAGE:main" && docker push "$IMAGE:main"
           fi
+          docker logout "$REGISTRY"
