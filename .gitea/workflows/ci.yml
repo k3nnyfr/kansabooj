@@ -134,6 +134,9 @@ jobs:
     # qui refusent les clients sous l'API 1.44 (celui de bookworm est en 1.41).
     container:
       image: docker.io/library/node:24-trixie-slim
+    defaults:
+      run:
+        shell: bash # avec « container: », act_runner prend sh (dash) par défaut
     env:
       REGISTRY: ${{ vars.REGISTRY || 'git.k3nny.fr' }}
       TRIVY_IMAGE: docker.io/aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
