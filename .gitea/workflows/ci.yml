@@ -24,13 +24,18 @@ jobs:
           POSTGRES_DB: postgres
         options: >-
           --health-cmd "pg_isready -U kansabooj" --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      CGO_ENABLED: "1" # -race exige cgo (le binaire livré, lui, reste en CGO_ENABLED=0)
     steps:
       - uses: actions/checkout@v4
-      - name: CA système
+      - name: CA système et compilateur C (go test -race)
         run: |
-          if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
+          need=""
+          [ -s /etc/ssl/certs/ca-certificates.crt ] || need="$need ca-certificates"
+          command -v gcc >/dev/null || need="$need gcc libc6-dev"
+          if [ -n "$need" ]; then
             SUDO=$(command -v sudo || true)
-            $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ca-certificates
+            $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends $need
           fi
       - uses: actions/setup-go@v5
         with:
