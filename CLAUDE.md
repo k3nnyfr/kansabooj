@@ -28,12 +28,14 @@ backend/
   internal/discover/    page de doc (Swagger-UI, Redoc, springdoc…) → URL de spec ; scripts suivis seulement sur le même hôte
   internal/fetch/       client HTTP : proxy, CA, auth, ETag, deny_cidrs, timeouts
   internal/normalize/   parse → v2→v3 → bundle $ref externes → ignore rules → JSON canonique → sha256 ; html.go : mode dégradé
-  internal/diff/        wrapper oasdiff → []ChangeItem (+ calcul in_scope vs exposed_operations)
+  internal/diff/        wrapper oasdiff → []ChangeItem (+ calcul in_scope vs exposed_operations) ; libellés en/fr
+                        (locale/fr.yaml) ; lines.go : diff ligne à ligne borné (vue côte à côte)
   internal/store/       accès base (PostgreSQL / SQLite, dialect.go), migrations, blobs, verrous distribués
   internal/store/storetest/  base jetable pour les tests (SQLite, ou PostgreSQL si KANSABOOJ_TEST_POSTGRES)
   internal/monitor/     orchestration d'un check : fetch → normalize → diff → store (utilisé par CLI et scheduler)
   internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine), reload de config
-  internal/notify/      décide/rend/envoie : slack | googlechat | teams | generic (HMAC), idempotent, retry/backoff
+  internal/notify/      décide/rend/envoie : slack | googlechat | teams | generic (HMAC), idempotent, retry/backoff ;
+                        digest.go : récapitulatifs quotidiens/hebdomadaires (file 'queued', envoi par le leader)
   internal/i18n/        catalogue FR/EN côté serveur (notifications)
   internal/metrics/     métriques Prometheus (compteurs d'instance + collecteur par API lu en base)
   internal/httpapi/     API REST /api/* (table routes() avec scope par route), auth (jetons/SSO), validation de config,
@@ -98,6 +100,8 @@ Les tests n'appellent jamais le réseau (httptest). Rechargement de config à ch
    ne pas le présenter comme une garantie. Ne jamais ajouter de chemin réseau qui contourne `internal/fetch`.
 7. **Notifications** : idempotentes (`UNIQUE(change_id, notifier)`), filtrées par `min_level` et `only_in_scope`.
    Le format de chaque plateforme vit dans son notifier ; le cœur ne manipule qu'un `ChangeEvent` neutre.
+   Un notifier en `digest` met les changements en file (`status = 'queued'`, événement neutre) ; le récapitulatif est
+   construit par le leader (`DigestLoop`) à l'échéance, une seule fois par échéance (`digest_runs`).
 8. Pas d'infra supplémentaire (Redis, broker, worker séparé) sans ADR justifiant le besoin.
 9. **Agnostique de la Gateway** : aucun connecteur spécifique à une plateforme (Kong, Apigee…). Le seul pont prévu est
    un contrat OpenAPI exporté (`gateway.published_spec`).
@@ -115,14 +119,18 @@ Les tests n'appellent jamais le réseau (httptest). Rechargement de config à ch
     dans le fichier principal. Les messages de validation citent le fichier d'origine.
 16. **Toute requête sortante dérivée d'un contenu partenaire** (scripts de page, candidats de découverte, `$ref`
     externes) passe par le `fetch.Client` de l'API, en http(s) uniquement, avec un nombre de requêtes borné. Ne jamais
-    utiliser `openapi3.DefaultReadFromURI` ni lire un chemin local à partir d'une spec.
+    utiliser `openapi3.DefaultReadFromURI` ni lire un chemin local à partir d'une spec. Seule exception :
+    `normalize.Options.LocalDir`, réservé à la CLI (`kansabooj diff` sur les fichiers de l'utilisateur), qui limite la
+    lecture au dossier du fichier racine (liens symboliques résolus) ; le serveur ne le renseigne jamais.
 17. Ne pas changer la forme canonique des specs existantes (hash) sans migration : tout changement de normalisation
     produirait une « évolution » fantôme sur toutes les APIs. Le bundling n'est appliqué qu'aux specs ayant des `$ref` externes.
 
 ## Conventions
 
 - Code, identifiants, commits : anglais. Docs, UI et messages d'erreur utilisateur : français.
-  Exception : les libellés de changements viennent d'oasdiff, qui n'existe qu'en anglais — ne pas les traduire à la main.
+  Libellés de changements : oasdiff ne parle qu'anglais ; leur traduction vit dans `internal/diff/locale/fr.yaml`
+  (par `rule_id`, mêmes arguments, réordonnables avec `%[n]s`). `TestFrenchCatalogue` échoue si une règle d'une nouvelle
+  version d'oasdiff n'est pas traduite ou si une traduction perd un argument. On stocke `text` (anglais) et `text_fr`.
 - Go : `internal/` uniquement, interfaces définies côté consommateur, erreurs wrappées (`fmt.Errorf("...: %w", err)`),
   `context.Context` en premier paramètre de tout ce qui fait de l'I/O.
 - Tests : table-driven ; fixtures de specs dans `backend/internal/*/testdata/` (paires `before`/`after` pour le diff,

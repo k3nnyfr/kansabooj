@@ -181,7 +181,8 @@ type ChangeItemRow struct {
 	Method  string `json:"method,omitempty"`
 	Path    string `json:"path,omitempty"`
 	InScope bool   `json:"in_scope"`
-	Text    string `json:"text"`
+	Text    string `json:"text"`              // English
+	TextFR  string `json:"text_fr,omitempty"` // French (absent for items stored before v0.6)
 }
 
 type ChangeDetail struct {
@@ -203,7 +204,7 @@ func (s *Store) GetChange(ctx context.Context, id int64) (*ChangeDetail, error) 
 		return nil, err
 	}
 	d.TimelineEntry = *e
-	rows, err := s.db.QueryContext(ctx, `SELECT rule_id, level, COALESCE(method,''), COALESCE(path,''), in_scope, text
+	rows, err := s.db.QueryContext(ctx, `SELECT rule_id, level, COALESCE(method,''), COALESCE(path,''), in_scope, text, COALESCE(text_fr,'')
 FROM change_items WHERE change_id = ? ORDER BY CASE level WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, path, method, id`, id)
 	if err != nil {
 		return nil, err
@@ -212,7 +213,7 @@ FROM change_items WHERE change_id = ? ORDER BY CASE level WHEN 'error' THEN 0 WH
 	d.Items = []ChangeItemRow{}
 	for rows.Next() {
 		var it ChangeItemRow
-		if err := rows.Scan(&it.RuleID, &it.Level, &it.Method, &it.Path, &it.InScope, &it.Text); err != nil {
+		if err := rows.Scan(&it.RuleID, &it.Level, &it.Method, &it.Path, &it.InScope, &it.Text, &it.TextFR); err != nil {
 			return nil, err
 		}
 		d.Items = append(d.Items, it)
@@ -334,17 +335,27 @@ type Notification struct {
 	ChangeID    *int64
 	APIID       string
 	Notifier    string
-	Kind        string // change | stale | recovered
+	Kind        string // change | stale | recovered | digest
+	Status      string // pending (default) | queued (waiting for a digest)
 	Payload     []byte
 	ContentType string
 	Attempts    int
+	At          time.Time // creation: first attempt (pending) or event time (queued); zero = now
 }
 
 // CreateNotification stores a pending notification. A change is notified at most
 // once per notifier: a duplicate returns created=false.
 func (s *Store) CreateNotification(ctx context.Context, n *Notification) (created bool, err error) {
+	status := n.Status
+	if status == "" {
+		status = "pending"
+	}
+	at := now()
+	if !n.At.IsZero() {
+		at = n.At.UTC()
+	}
 	err = s.db.QueryRowContext(ctx, `INSERT INTO notifications (change_id, api_id, notifier, kind, status, payload, content_type, next_attempt_at)
-VALUES (?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`, n.ChangeID, n.APIID, n.Notifier, n.Kind, string(n.Payload), n.ContentType, now()).Scan(&n.ID)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`, n.ChangeID, n.APIID, n.Notifier, n.Kind, status, string(n.Payload), n.ContentType, at).Scan(&n.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -403,4 +414,99 @@ func parseTime(v sql.NullString) *time.Time {
 		}
 	}
 	return nil
+}
+
+// SnapshotRow is one distinct version of an API, for picking two versions to compare.
+type SnapshotRow struct {
+	ID             int64     `json:"id"`
+	FetchedAt      time.Time `json:"fetched_at"`
+	Version        string    `json:"version,omitempty"`
+	Format         string    `json:"format"`
+	OperationCount int       `json:"operation_count"`
+}
+
+// ListSnapshots returns the versions of an API, newest first.
+func (s *Store) ListSnapshots(ctx context.Context, apiID string, limit int) ([]SnapshotRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, fetched_at, COALESCE(info_version,''), spec_format, COALESCE(operation_count,0)
+FROM snapshots WHERE api_id = ? ORDER BY id DESC LIMIT ?`, apiID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SnapshotRow{}
+	for rows.Next() {
+		var r SnapshotRow
+		var fetched string
+		if err := rows.Scan(&r.ID, &fetched, &r.Version, &r.Format, &r.OperationCount); err != nil {
+			return nil, err
+		}
+		if t := parseTime(sql.NullString{String: fetched, Valid: true}); t != nil {
+			r.FetchedAt = *t
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// QueuedNotifications returns the events waiting for the next digest of a notifier,
+// queued up to until (the digest due time), oldest first.
+func (s *Store) QueuedNotifications(ctx context.Context, notifier string, until time.Time) ([]Notification, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, change_id, api_id, notifier, kind, COALESCE(payload,''), COALESCE(content_type,'')
+FROM notifications WHERE notifier = ? AND status = 'queued' AND next_attempt_at <= ? ORDER BY id`, notifier, until.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Notification
+	for rows.Next() {
+		var n Notification
+		var change sql.NullInt64
+		var payload string
+		if err := rows.Scan(&n.ID, &change, &n.APIID, &n.Notifier, &n.Kind, &payload, &n.ContentType); err != nil {
+			return nil, err
+		}
+		if change.Valid {
+			n.ChangeID = &change.Int64
+		}
+		n.Payload, n.Status = []byte(payload), "queued"
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// DigestLastRun returns the due time of the last digest processed for a notifier.
+func (s *Store) DigestLastRun(ctx context.Context, notifier string) (*time.Time, error) {
+	var v sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT last_run_at FROM digest_runs WHERE notifier = ?`, notifier).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return parseTime(v), nil
+}
+
+// CompleteDigest records a digest run in one transaction: the queued events it covers
+// become 'digested', the digest message (if any) is stored as a pending notification,
+// and the run time is saved so that it is not processed again (multi-replica safe:
+// only the leader runs digests, and the transaction makes a retry idempotent).
+func (s *Store) CompleteDigest(ctx context.Context, notifier string, due time.Time, covered []int64, msg *Notification) error {
+	return s.tx(ctx, func(t *rtx) error {
+		if msg != nil {
+			if err := t.QueryRowContext(ctx, `INSERT INTO notifications (change_id, api_id, notifier, kind, status, payload, content_type, next_attempt_at)
+VALUES (NULL, ?, ?, 'digest', 'pending', ?, ?, ?) RETURNING id`, msg.APIID, notifier, string(msg.Payload), msg.ContentType, now()).Scan(&msg.ID); err != nil {
+				return err
+			}
+			msg.Kind, msg.Notifier, msg.Status = "digest", notifier, "pending"
+		}
+		for _, id := range covered {
+			if _, err := t.ExecContext(ctx, `UPDATE notifications SET status = 'digested', sent_at = ? WHERE id = ? AND status = 'queued'`, now(), id); err != nil {
+				return err
+			}
+		}
+		_, err := t.ExecContext(ctx, `INSERT INTO digest_runs (notifier, last_run_at) VALUES (?, ?)
+ON CONFLICT (notifier) DO UPDATE SET last_run_at = excluded.last_run_at`, notifier, due.UTC())
+		return err
+	})
 }

@@ -148,6 +148,7 @@ func (s *Scheduler) lead(parent context.Context, lock *store.Lock) error {
 	s.mu.Unlock()
 
 	go s.disp.RetryLoop(ctx, 30*time.Second)
+	go s.disp.DigestLoop(ctx, time.Minute)
 	go s.purgeLoop(ctx)
 
 	t := time.NewTicker(s.tick)

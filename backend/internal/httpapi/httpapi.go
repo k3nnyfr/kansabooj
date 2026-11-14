@@ -65,6 +65,8 @@ func (s *Server) routes() []route {
 		{"GET", "/api/apis", "read", s.listAPIs},
 		{"GET", "/api/apis/{id}", "read", s.getAPI},
 		{"GET", "/api/apis/{id}/timeline", "read", s.timeline},
+		{"GET", "/api/apis/{id}/snapshots", "read", s.snapshots},
+		{"GET", "/api/apis/{id}/compare", "read", s.compare},
 		{"POST", "/api/apis/{id}/check", "check", s.check},
 		{"POST", "/api/apis/{id}/ack", "ack", s.ackAll},
 		{"GET", "/api/changes/{id}", "read", s.getChange},

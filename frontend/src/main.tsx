@@ -5,6 +5,7 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { api } from './api/client'
 import { I18nProvider, useI18n } from './i18n'
 import { ApiDetail } from './pages/ApiDetail'
+import { Compare } from './pages/Compare'
 import { ApiList } from './pages/ApiList'
 import { StatusPage } from './pages/StatusPage'
 import './styles.css'
@@ -38,6 +39,7 @@ function Shell() {
         <Routes>
           <Route path="/" element={<ApiList />} />
           <Route path="/apis/:id" element={<ApiDetail />} />
+          <Route path="/apis/:id/compare" element={<Compare />} />
           <Route path="/status" element={<StatusPage />} />
         </Routes>
       </main>

@@ -70,6 +70,10 @@ func (d *Dispatcher) HandleOutcome(ctx context.Context, api *config.API, o *moni
 			if !ok {
 				continue
 			}
+			if digested(n, &e) {
+				d.queue(ctx, n, &e)
+				continue
+			}
 			d.enqueue(ctx, n, &e)
 		}
 	}

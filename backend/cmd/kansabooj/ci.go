@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -113,7 +114,21 @@ Exemple (CI d'une équipe productrice) :
 	}
 	var specs [2]*normalize.Result
 	for i := range docs {
-		r, err := normalize.Normalize(docs[i], ignore)
+		// multi-file specs: external $refs resolved relative to each side (an http(s) URL,
+		// or a local file whose directory bounds the files that may be read)
+		o := normalize.Options{Ignore: ignore, Ctx: ctx}
+		switch ref := fs.Arg(i); {
+		case strings.HasPrefix(ref, "kansabooj:"): // stored normalized form, already self-contained
+		case strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://"):
+			o.Location = ref
+			o.Fetch = func(ctx context.Context, u string) ([]byte, error) { return cl.fetch(ctx, u, false) }
+		default:
+			if abs, err := filepath.Abs(ref); err == nil {
+				o.Location = (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+				o.LocalDir = filepath.Dir(abs)
+			}
+		}
+		r, err := normalize.NormalizeWith(docs[i], o)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s : %v\n", fs.Arg(i), err)
 			return 2

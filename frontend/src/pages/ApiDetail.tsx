@@ -66,6 +66,9 @@ export function ApiDetail() {
           {a.unacknowledged > 0 && (
             <button className="btn btn-secondary" onClick={() => ackAll.mutate()} disabled={ackAll.isPending}>{t('action.ackAll')}</button>
           )}
+          {entries.filter((e) => !e.first_capture).length > 0 && (
+            <Link className="btn btn-secondary" to={`/apis/${encodeURIComponent(a.id)}/compare`}>{t('action.compare')}</Link>
+          )}
           <CheckButton id={a.id} onResult={setLastCheck} />
         </div>
       </header>
@@ -82,7 +85,7 @@ export function ApiDetail() {
           {entries.length === 0 && !timeline.isLoading && <p className="muted">{t('detail.noChanges')}</p>}
           <ol className="timeline">
             {entries.map((e) => (
-              <TimelineCard key={e.id} entry={e} focused={e.id === focus} />
+              <TimelineCard key={e.id} apiID={a.id} entry={e} focused={e.id === focus} />
             ))}
           </ol>
           {timeline.hasNextPage && (
@@ -134,8 +137,8 @@ function CheckFeedback({ r }: { r: CheckResult }) {
   )
 }
 
-function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: boolean }) {
-  const { t, date, relative } = useI18n()
+function TimelineCard({ apiID, entry: e, focused }: { apiID: string; entry: TimelineEntry; focused: boolean }) {
+  const { t, date, relative, lang } = useI18n()
   const qc = useQueryClient()
   const [open, setOpen] = useState(focused || (!e.acknowledged_at && !e.first_capture))
   const [showOut, setShowOut] = useState(false)
@@ -178,7 +181,7 @@ function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: bo
                 <li key={i} className={it.in_scope ? '' : 'out'}>
                   <LevelBadge level={it.level} />
                   {(it.method || it.path) && <span className="mono op">{it.method} {it.path}</span>}
-                  <span className="text">{it.text}</span>
+                  <span className="text">{(lang === 'fr' && it.text_fr) || it.text}</span>
                   {!it.in_scope && <span className="small muted"> ({t('level.outOfScope')})</span>}
                 </li>
               ))}
@@ -191,6 +194,9 @@ function TimelineCard({ entry: e, focused }: { entry: TimelineEntry; focused: bo
               )}
               <a href={api.specUrl(e.to_snapshot_id, 'normalized')} target="_blank" rel="noreferrer">{t('detail.spec')}</a>
               <a href={api.specUrl(e.to_snapshot_id, 'raw')} target="_blank" rel="noreferrer">{t('detail.specRaw')}</a>
+              {e.from_snapshot_id && (
+                <Link to={`/apis/${encodeURIComponent(apiID)}/compare?from=${e.from_snapshot_id}&to=${e.to_snapshot_id}`}>{t('action.compareThis')}</Link>
+              )}
               <span className="spacer" />
               {e.acknowledged_at ? (
                 <span className="muted" title={date(e.acknowledged_at)}>{t('change.seenBy', { who: e.acknowledged_by ?? '?', when: relative(e.acknowledged_at) })}</span>

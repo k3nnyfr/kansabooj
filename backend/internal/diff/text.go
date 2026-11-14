@@ -19,19 +19,22 @@ const (
 func CompareText(prev, cur []byte) *Summary {
 	added, removed := lineDelta(splitLines(prev), splitLines(cur))
 	s := &Summary{}
-	s.Items = append(s.Items, Item{RuleID: RuleHTMLChanged, Level: LevelWarn, InScope: true,
-		Text: fmt.Sprintf("documentation modifiée (mode dégradé, sans analyse du contrat) : +%d / −%d ligne(s) — vérification manuelle nécessaire", len(added), len(removed))})
+	s.Items = append(s.Items, item(RuleHTMLChanged, LevelWarn, true,
+		fmt.Sprintf("documentation changed (degraded mode, no contract analysis): +%d / −%d line(s), check manually", len(added), len(removed)),
+		fmt.Sprintf("documentation modifiée (mode dégradé, sans analyse du contrat) : +%d / −%d ligne(s) — vérification manuelle nécessaire", len(added), len(removed))))
 	for i, l := range removed {
 		if i == maxTextLines {
 			break
 		}
-		s.Items = append(s.Items, Item{RuleID: RuleHTMLLineRemoved, Level: LevelInfo, InScope: true, Text: "− " + truncate(l, 200)})
+		t := "− " + truncate(l, 200)
+		s.Items = append(s.Items, item(RuleHTMLLineRemoved, LevelInfo, true, t, t))
 	}
 	for i, l := range added {
 		if i == maxTextLines {
 			break
 		}
-		s.Items = append(s.Items, Item{RuleID: RuleHTMLLineAdded, Level: LevelInfo, InScope: true, Text: "+ " + truncate(l, 200)})
+		t := "+ " + truncate(l, 200)
+		s.Items = append(s.Items, item(RuleHTMLLineAdded, LevelInfo, true, t, t))
 	}
 	s.Warns, s.Infos, s.InScope = 1, len(s.Items)-1, len(s.Items)
 	return s
@@ -39,8 +42,9 @@ func CompareText(prev, cur []byte) *Summary {
 
 // FirstCaptureText describes the first degraded-mode snapshot.
 func FirstCaptureText(lines int) *Summary {
-	return &Summary{Infos: 1, InScope: 1, Items: []Item{{RuleID: RuleFirstCapture, Level: LevelInfo, InScope: true,
-		Text: fmt.Sprintf("première capture de la documentation (mode dégradé : texte de la page, %d lignes)", lines)}}}
+	return &Summary{Infos: 1, InScope: 1, Items: []Item{item(RuleFirstCapture, LevelInfo, true,
+		fmt.Sprintf("first capture of the documentation (degraded mode: page text, %d lines)", lines),
+		fmt.Sprintf("première capture de la documentation (mode dégradé : texte de la page, %d lignes)", lines))}}
 }
 
 func splitLines(b []byte) []string {
@@ -84,6 +88,7 @@ func truncate(s string, n int) string {
 
 // ModeChanged describes a switch between degraded (html) and semantic capture.
 func ModeChanged(from, to, version string) *Summary {
-	return &Summary{VersionTo: version, Warns: 1, InScope: 1, Items: []Item{{RuleID: "capture-mode-changed", Level: LevelWarn, InScope: true,
-		Text: fmt.Sprintf("mode de capture modifié : %s → %s (comparaison sémantique impossible avec la version précédente)", from, to)}}}
+	return &Summary{VersionTo: version, Warns: 1, InScope: 1, Items: []Item{item("capture-mode-changed", LevelWarn, true,
+		fmt.Sprintf("capture mode changed: %s → %s (no semantic comparison with the previous version)", from, to),
+		fmt.Sprintf("mode de capture modifié : %s → %s (comparaison sémantique impossible avec la version précédente)", from, to))}}
 }

@@ -77,6 +77,17 @@ notifiers:
     secret: ${CATALOGUE_HOOK_SECRET}
     min_level: info
     only_in_scope: false
+  - name: archi-weekly
+    type: teams
+    url: ${TEAMS_WEBHOOK_ARCHI}
+    min_level: info
+    subscribe: { groups: [paiement] }
+    digest:                 # un récapitulatif au lieu d'un message par changement
+      every: weekly         # daily | weekly
+      at: "09:00"           # heure locale (défaut 08:00)
+      day: monday           # weekly uniquement (défaut monday)
+      timezone: Europe/Paris
+      immediate_level: error  # les ruptures partent tout de suite, le reste attend le récapitulatif
 
 groups:
   - id: paiement

@@ -19,11 +19,9 @@ const (
 	LevelWarn  = "warn"  // potentially breaking
 	LevelInfo  = "info"
 
-	RuleVersionChanged  = "api-version-changed"
-	RuleNonSemantic     = "non-semantic-change"
-	RuleFirstCapture    = "first-capture"
-	ruleTextVersionFmt  = "version de l'API modifiée : %s → %s"
-	ruleTextNonSemantic = "modifications sans impact sur le contrat (descriptions, exemples, métadonnées…)"
+	RuleVersionChanged = "api-version-changed"
+	RuleNonSemantic    = "non-semantic-change"
+	RuleFirstCapture   = "first-capture"
 )
 
 type Item struct {
@@ -31,15 +29,24 @@ type Item struct {
 	Level   string `json:"level"`
 	Method  string `json:"method,omitempty"`
 	Path    string `json:"path,omitempty"`
-	Text    string `json:"text"`
+	Text    string `json:"text"`              // English (oasdiff's own wording)
+	TextFR  string `json:"text_fr,omitempty"` // French (locale/fr.yaml)
 	InScope bool   `json:"in_scope"`
 }
 
+// item builds a Kansabooj-generated item (not from oasdiff) in both languages.
+func item(rule, level string, inScope bool, en, fr string) Item {
+	return Item{RuleID: rule, Level: level, InScope: inScope, Text: en, TextFR: fr}
+}
+
 type Summary struct {
-	VersionFrom, VersionTo string
-	Items                  []Item
-	Errors, Warns, Infos   int
-	InScope                int
+	VersionFrom string `json:"version_from,omitempty"`
+	VersionTo   string `json:"version_to,omitempty"`
+	Items       []Item `json:"items"`
+	Errors      int    `json:"errors"`
+	Warns       int    `json:"warns"`
+	Infos       int    `json:"infos"`
+	InScope     int    `json:"in_scope"`
 }
 
 // MaxLevel returns the most severe level present, or "" when there is no item.
@@ -76,17 +83,21 @@ func Compare(prev, cur *openapi3.T, exposed []string) (*Summary, error) {
 			Method: c.GetOperation(),
 			Path:   c.GetPath(),
 			Text:   c.GetUncolorizedText(loc),
+			TextFR: c.GetUncolorizedText(frLocalizer),
 		}
 		it.InScope = scope.contains(it.Method, it.Path)
 		s.Items = append(s.Items, it)
 	}
 
 	if s.VersionFrom != s.VersionTo {
-		s.Items = append(s.Items, Item{RuleID: RuleVersionChanged, Level: LevelInfo, InScope: true,
-			Text: fmt.Sprintf(ruleTextVersionFmt, orNA(s.VersionFrom), orNA(s.VersionTo))})
+		from, to := orNA(s.VersionFrom), orNA(s.VersionTo)
+		s.Items = append(s.Items, item(RuleVersionChanged, LevelInfo, true,
+			fmt.Sprintf("API version changed: %s → %s", from, to), fmt.Sprintf("version de l'API modifiée : %s → %s", from, to)))
 	}
 	if len(s.Items) == 0 {
-		s.Items = append(s.Items, Item{RuleID: RuleNonSemantic, Level: LevelInfo, InScope: len(exposed) == 0, Text: ruleTextNonSemantic})
+		s.Items = append(s.Items, item(RuleNonSemantic, LevelInfo, len(exposed) == 0,
+			"changes without contract impact (descriptions, examples, metadata…)",
+			"modifications sans impact sur le contrat (descriptions, exemples, métadonnées…)"))
 	}
 
 	sort.SliceStable(s.Items, func(i, j int) bool {
@@ -116,10 +127,10 @@ func Compare(prev, cur *openapi3.T, exposed []string) (*Summary, error) {
 
 // FirstCapture describes the very first snapshot of an API.
 func FirstCapture(cur *openapi3.T, operations int) *Summary {
-	return &Summary{VersionTo: version(cur), Infos: 1, InScope: 1, Items: []Item{{
-		RuleID: RuleFirstCapture, Level: LevelInfo, InScope: true,
-		Text: fmt.Sprintf("première capture du contrat (version %s, %d opérations)", orNA(version(cur)), operations),
-	}}}
+	v := orNA(version(cur))
+	return &Summary{VersionTo: version(cur), Infos: 1, InScope: 1, Items: []Item{item(RuleFirstCapture, LevelInfo, true,
+		fmt.Sprintf("first capture of the contract (version %s, %d operations)", v, operations),
+		fmt.Sprintf("première capture du contrat (version %s, %d opérations)", v, operations))}}
 }
 
 func level(l checker.Level) string {

@@ -1,6 +1,6 @@
 # Kansabooj
 
-![version](https://img.shields.io/badge/version-v0.5-blue.svg)
+![version](https://img.shields.io/badge/version-v0.6-blue.svg)
 
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
@@ -10,7 +10,7 @@ Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend 
 
 ## Pourquoi
 
-Un partenaire publie une nouvelle version de son API : un paramètre devient obligatoire, un champ disparaît d'une réponse. Personne n'est prévenu, et l'on découvre la rupture en production, à travers la Gateway. Kansabooj fait ce travail de veille à la place des équipes : il compare des **formes normalisées** des contrats (l'ordre des clés, le format JSON ou YAML et les champs déclarés comme bruit n'entrent pas en compte), classe chaque changement avec [oasdiff](https://github.com/oasdiff/oasdiff) et distingue ce qui touche **les opérations que vous réexposez** de tout le reste.
+Un partenaire publie une nouvelle version de son API : un paramètre devient obligatoire, un champ disparaît d'une réponse. Personne n'est prévenu, et l'on découvre la rupture en production, à travers la Gateway. Kansabooj fait ce travail de veille à la place des équipes. Il ne signale que les **vrais changements de contenu** : un contrat réordonné, republié en YAML au lieu de JSON, ou dont seuls les champs que vous déclarez comme bruit ont bougé (serveurs, dates de génération…) est considéré comme identique. Chaque changement est ensuite classé avec [oasdiff](https://github.com/oasdiff/oasdiff), en distinguant ce qui touche **les opérations que vous réexposez** de tout le reste.
 
 ## Ce que fait Kansabooj
 
@@ -21,12 +21,13 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Périmètre réexposé** | `exposed_operations` liste ce que la Gateway publie : un changement hors de ce périmètre est montré à part et peut ne pas notifier. |
 | **Mode dégradé** | Une documentation en HTML seul est suivie par son texte visible (sans menus ni pied de page) ; les lignes ajoutées ou retirées sont montrées, à vérifier à la main. |
 | **Historique** | Chaque version distincte est conservée (spec brute et normalisée) ; la timeline de chaque API montre les évolutions, qui les a vues et quand. |
-| **Notifications** | Google Chat, Slack, Teams, webhook générique signé HMAC ; filtrées par niveau et par périmètre, abonnements par groupe ou par tag, envoi idempotent avec relances. |
+| **Comparaison** | Deux versions quelconques d'une API comparées dans l'interface : changements classés, et specs normalisées côte à côte. |
+| **Notifications** | Google Chat, Slack, Teams, webhook générique signé HMAC ; filtrées par niveau et par périmètre, abonnements par groupe ou par tag, envoi idempotent avec relances. Au choix, un message par changement ou un récapitulatif quotidien ou hebdomadaire (les ruptures pouvant partir tout de suite). |
 | **Groupes et tags** | Regrouper les APIs par domaine ou par équipe, avec héritage des réglages (API > groupe > valeurs par défaut). |
 | **Accès authentifiés** | Clé d'API, basic, bearer, OAuth2 *client credentials*, mTLS ; les identifiants ne partent jamais vers un autre hôte que celui configuré. |
 | **As-code** | La configuration est un fichier YAML versionné (avec JSON Schema pour l'autocomplétion). Chaque équipe peut maintenir son propre fragment, validé en CI par le serveur. |
 | **Contrôle de contrat en CI** | `kansabooj diff` compare la spec produite par un build à la version connue, et échoue sur une rupture dans le périmètre réexposé. |
-| **Interface** | Français ou anglais, filtres par état, groupe et tag, check à la demande, marquage « vu », page de statut. |
+| **Interface** | Français ou anglais, y compris le détail de chaque changement ; filtres par état, groupe et tag, check à la demande, marquage « vu », page de statut. |
 | **Exploitation** | Métriques Prometheus, rechargement de la configuration à chaud, plusieurs réplicas avec élection d'un leader, image sans état en lecture seule. |
 
 ## Aperçu
@@ -37,8 +38,8 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Fiche d'une API** : timeline des versions, changements cassants dans le périmètre réexposé, liens vers les specs | **Groupes** : les APIs par domaine, avec leur équipe et leurs tags |
 | ![Colis Express : spec découverte derrière une page Swagger-UI, évolution déjà vue](docs/images/api-discovery.png) | ![Météo Pro : documentation HTML suivie en mode dégradé, lignes ajoutées et retirées](docs/images/api-html.png) |
 | **Découverte** : l'adresse donnée est une page Swagger-UI, la spec suivie est retrouvée derrière | **Mode dégradé** : une page HTML sans spec, comparée ligne à ligne |
-| ![Page de statut : instance leader, APIs en échec](docs/images/status.png) | |
-| **Statut** : rôle de l'instance, APIs en échec et prochains checks | |
+| ![Comparaison de PayFlow 3.0.0 et 3.1.0 : changements, puis specs normalisées côte à côte](docs/images/compare.png) | ![Page de statut : instance leader, APIs en échec](docs/images/status.png) |
+| **Comparaison** : deux versions au choix, changements classés et diff côte à côte | **Statut** : rôle de l'instance, APIs en échec et prochains checks |
 
 Les captures sont faites sur des APIs fictives servies en local (`scripts/screenshots/`), régénérables avec `task screenshots`.
 
@@ -144,10 +145,10 @@ Les tests n'appellent jamais le réseau. Conventions et principes du projet : [C
 
 ## Limites
 
-- Les libellés des changements viennent d'oasdiff et sont **en anglais** ; l'interface et les notifications sont en français ou en anglais.
 - Le **mode dégradé HTML** signale qu'une page a changé, sans dire si le contrat est cassé : la vérification reste manuelle.
 - La découverte ne lit que la configuration visible de la page et de ses scripts du même hôte ; une page entièrement construite côté client peut demander de donner l'URL de la spec directement.
-- Les `$ref` externes ne sont pas pris en charge en Swagger 2.0, et `kansabooj diff` ne regroupe pas une spec locale répartie en plusieurs fichiers.
+- Les changements enregistrés avant la v0.6 n'ont que leur libellé d'origine (anglais pour ceux d'oasdiff).
+- La vue côte à côte s'arrête au-delà de 2000 lignes modifiées entre deux versions : les deux specs normalisées restent téléchargeables.
 - Formats non couverts : AsyncAPI, GraphQL, WSDL.
 
 ## Licence

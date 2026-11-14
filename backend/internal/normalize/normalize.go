@@ -46,6 +46,10 @@ type Options struct {
 	// It must go through the API's fetch client (network policy, origin-bound credentials).
 	Fetch func(ctx context.Context, url string) ([]byte, error)
 	Ctx   context.Context
+	// LocalDir allows file:// external refs, only for files under this directory (symlinks
+	// resolved). Reserved to the CLI on the user's own files (kansabooj diff); the server
+	// never sets it: a partner spec must not make it read local files.
+	LocalDir string
 }
 
 // maxExternalRefs bounds the files fetched to bundle one multi-file spec.
@@ -92,6 +96,14 @@ func NormalizeWith(raw []byte, o Options) (*Result, error) {
 	switch {
 	case strings.HasPrefix(str(root["swagger"]), "2"):
 		res.Format = "swagger-2.0"
+		// kin-openapi cannot load external refs of a Swagger 2.0 document: they are
+		// inlined in the JSON tree first (cycles hoisted to #/definitions)
+		if hasExternalRef(root) {
+			if root, err = inlineRefs(root, o); err != nil {
+				return nil, err
+			}
+			res.Bundled = true
+		}
 		if root, err = convertV2(root); err != nil {
 			return nil, err
 		}
@@ -103,9 +115,6 @@ func NormalizeWith(raw []byte, o Options) (*Result, error) {
 		return nil, fmt.Errorf("%w : ni champ \"openapi: 3.x\" ni \"swagger: 2.0\"", ErrNotSpec)
 	}
 	if hasExternalRef(root) {
-		if res.Format == "swagger-2.0" {
-			return nil, errors.New("références $ref externes non supportées pour Swagger 2.0 (seulement OpenAPI 3)")
-		}
 		if root, err = bundle(root, o); err != nil {
 			return nil, err
 		}
@@ -285,14 +294,7 @@ func hasExternalRef(n any) bool {
 // bundle resolves external $refs and internalizes them into components, so that the
 // canonical document is self-contained (and stable for hashing and diffing).
 func bundle(root map[string]any, o Options) (map[string]any, error) {
-	if o.Fetch == nil || o.Location == "" {
-		return nil, errors.New("la spec contient des $ref externes : leur résolution nécessite l'URL d'origine")
-	}
-	ctx := o.Ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	loc, err := url.Parse(o.Location)
+	r, loc, err := newRefReader(o)
 	if err != nil {
 		return nil, err
 	}
@@ -300,25 +302,15 @@ func bundle(root map[string]any, o Options) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	fetched := 0
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
-	// SECURITY: a custom reader bypasses kin-openapi's own checks; only http(s) through
-	// the API's fetch client (deny/allow lists, origin-bound credentials), bounded.
-	loader.ReadFromURIFunc = func(_ *openapi3.Loader, u *url.URL) ([]byte, error) {
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return nil, fmt.Errorf("$ref externe %q refusée : seules les URLs http(s) sont autorisées", u)
-		}
-		if fetched++; fetched > maxExternalRefs {
-			return nil, fmt.Errorf("plus de %d fichiers référencés : abandon", maxExternalRefs)
-		}
-		return o.Fetch(ctx, u.String())
-	}
+	// SECURITY: a custom reader bypasses kin-openapi's own checks; see refReader.read.
+	loader.ReadFromURIFunc = func(_ *openapi3.Loader, u *url.URL) ([]byte, error) { return r.read(u) }
 	doc, err := loader.LoadFromDataWithPath(data, loc)
 	if err != nil {
 		return nil, fmt.Errorf("résolution des $ref externes : %w", err)
 	}
-	doc.InternalizeRefs(ctx, nil)
+	doc.InternalizeRefs(r.ctx, nil)
 	b, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err

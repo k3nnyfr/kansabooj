@@ -433,8 +433,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 			return fmt.Errorf("change : %w", err)
 		}
 		for _, it := range sm.Items {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO change_items (change_id, rule_id, level, method, path, in_scope, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				changeID, it.RuleID, it.Level, it.Method, it.Path, it.InScope, it.Text); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO change_items (change_id, rule_id, level, method, path, in_scope, text, text_fr) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				changeID, it.RuleID, it.Level, it.Method, it.Path, it.InScope, it.Text, nullIfEmpty(it.TextFR)); err != nil {
 				return err
 			}
 		}

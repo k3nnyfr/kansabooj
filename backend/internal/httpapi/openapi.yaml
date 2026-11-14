@@ -117,6 +117,34 @@ paths:
         "200":
           description: Timeline
           content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/TimelineEntry" } } } }
+  /api/apis/{id}/snapshots:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    get:
+      tags: [changes]
+      summary: Versions distinctes d'une API (pour en comparer deux), de la plus récente à la plus ancienne
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+      responses:
+        "200":
+          description: Versions
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Snapshot" } } } }
+  /api/apis/{id}/compare:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    get:
+      tags: [changes]
+      summary: Compare deux versions quelconques d'une API
+      description: >-
+        Changements sémantiques (oasdiff, avec le périmètre réexposé actuel de l'API) et diff ligne à ligne des
+        documents normalisés. Au-delà de 2000 lignes modifiées, text_diff.too_large est vrai et aucun bloc n'est renvoyé.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: integer }, description: "id de la version de départ" }
+        - { name: to, in: query, required: true, schema: { type: integer }, description: "id de la version d'arrivée" }
+      responses:
+        "200":
+          description: Comparaison
+          content: { application/json: { schema: { $ref: "#/components/schemas/Comparison" } } }
+        "400": { description: Paramètres invalides, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/apis/{id}/check:
     parameters: [ { $ref: "#/components/parameters/ApiId" } ]
     post:
@@ -301,7 +329,54 @@ components:
         method: { type: string }
         path: { type: string }
         in_scope: { type: boolean }
-        text: { type: string }
+        text: { type: string, description: "libellé en anglais (celui d'oasdiff)" }
+        text_fr: { type: string, description: "libellé en français ; absent pour les changements enregistrés avant la v0.6" }
+    Snapshot:
+      type: object
+      properties:
+        id: { type: integer }
+        fetched_at: { type: string, format: date-time }
+        version: { type: string }
+        format: { type: string, description: "openapi-3.1 | openapi-3.0 | swagger-2.0 | html" }
+        operation_count: { type: integer }
+    Comparison:
+      type: object
+      properties:
+        from: { type: object, properties: { id: { type: integer }, semantic: { type: boolean } } }
+        to: { type: object, properties: { id: { type: integer }, semantic: { type: boolean } } }
+        summary:
+          type: object
+          properties:
+            version_from: { type: string }
+            version_to: { type: string }
+            errors: { type: integer }
+            warns: { type: integer }
+            infos: { type: integer }
+            in_scope: { type: integer }
+            items: { type: array, items: { $ref: "#/components/schemas/ChangeItem" } }
+        text_diff:
+          type: object
+          properties:
+            added: { type: integer }
+            removed: { type: integer }
+            truncated: { type: boolean }
+            too_large: { type: boolean }
+            hunks:
+              type: array
+              items:
+                type: object
+                properties:
+                  old_start: { type: integer }
+                  new_start: { type: integer }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        op: { type: string, enum: ["=", "-", "+"] }
+                        old: { type: integer }
+                        new: { type: integer }
+                        text: { type: string }
     ChangeDetail:
       allOf:
         - $ref: "#/components/schemas/TimelineEntry"

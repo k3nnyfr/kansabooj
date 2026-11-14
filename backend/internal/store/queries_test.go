@@ -36,7 +36,7 @@ func TestQueries(t *testing.T) {
 	first := save("1", nil, &diff.Summary{VersionTo: "1", Infos: 1, Items: []diff.Item{{RuleID: "first-capture", Level: "info", InScope: true, Text: "x"}}})
 	c1, _ := st.GetChange(ctx, first)
 	second := save("2", &c1.ToSnapshotID, &diff.Summary{VersionFrom: "1", VersionTo: "2", Errors: 1, InScope: 1,
-		Items: []diff.Item{{RuleID: "r", Level: "error", Method: "GET", Path: "/x", InScope: true, Text: "removed"}}})
+		Items: []diff.Item{{RuleID: "r", Level: "error", Method: "GET", Path: "/x", InScope: true, Text: "removed", TextFR: "supprimé"}}})
 
 	list, err := st.ListAPIs(ctx, false)
 	if err != nil || len(list) != 1 {
@@ -62,6 +62,12 @@ func TestQueries(t *testing.T) {
 	d, _ := st.GetChange(ctx, second)
 	if d.AcknowledgedBy != "alice" || d.AcknowledgedAt == nil || len(d.Items) != 1 {
 		t.Errorf("detail = %+v", d)
+	}
+	if it := d.Items[0]; it.Text != "removed" || it.TextFR != "supprimé" {
+		t.Errorf("libellés = %+v", it)
+	}
+	if c1.Items[0].TextFR != "" {
+		t.Errorf("text_fr absent doit rester vide : %+v", c1.Items[0])
 	}
 	if r, _ := st.GetAPI(ctx, "a"); r.Unacknowledged != 0 {
 		t.Errorf("still unacknowledged: %+v", r)

@@ -152,3 +152,4 @@ shot api-breaking.png "/apis/payflow" 1010
 shot api-discovery.png "/apis/colis-express" 630
 shot api-html.png "/apis/meteo-pro" 735
 shot status.png "/status" 480
+shot compare.png "/apis/payflow/compare" 1100

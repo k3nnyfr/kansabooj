@@ -22,21 +22,23 @@ const (
 // Event is the platform-neutral description of what happened. Notifiers only
 // format it; they never decide whether to send.
 type Event struct {
-	Kind              string      `json:"kind"`
-	APIID             string      `json:"api_id"`
-	APIName           string      `json:"api_name"`
-	Owner             string      `json:"owner,omitempty"`
-	ChangeID          int64       `json:"change_id,omitempty"`
-	OccurredAt        time.Time   `json:"occurred_at"`
-	VersionFrom       string      `json:"version_from,omitempty"`
-	VersionTo         string      `json:"version_to,omitempty"`
-	MaxLevel          string      `json:"max_level,omitempty"`
-	Items             []diff.Item `json:"items,omitempty"`      // items selected for this notifier
-	OmittedOutOfScope int         `json:"omitted_out_of_scope"` // filtered out by only_in_scope
-	Error             string      `json:"error,omitempty"`
-	ConsecutiveErrors int         `json:"consecutive_errors,omitempty"`
-	Link              string      `json:"link,omitempty"`
-	counts            [3]int      // error, warn, info among Items
+	Kind              string        `json:"kind"`
+	APIID             string        `json:"api_id"`
+	APIName           string        `json:"api_name"`
+	Owner             string        `json:"owner,omitempty"`
+	ChangeID          int64         `json:"change_id,omitempty"`
+	OccurredAt        time.Time     `json:"occurred_at"`
+	VersionFrom       string        `json:"version_from,omitempty"`
+	VersionTo         string        `json:"version_to,omitempty"`
+	MaxLevel          string        `json:"max_level,omitempty"`
+	Items             []diff.Item   `json:"items,omitempty"`      // items selected for this notifier
+	OmittedOutOfScope int           `json:"omitted_out_of_scope"` // filtered out by only_in_scope
+	Error             string        `json:"error,omitempty"`
+	ConsecutiveErrors int           `json:"consecutive_errors,omitempty"`
+	Link              string        `json:"link,omitempty"`
+	Digest            []DigestEntry `json:"digest,omitempty"` // kind digest: the changes summarised
+	Since             *time.Time    `json:"since,omitempty"`  // kind digest: start of the period
+	counts            [3]int        // error, warn, info among Items
 }
 
 // message is the rendered, language-specific content shared by all formats.
@@ -50,6 +52,9 @@ type message struct {
 }
 
 func render(e *Event, lang string) message {
+	if e.Kind == KindDigest {
+		return renderDigest(e, lang)
+	}
 	m := message{Link: e.Link}
 	if e.Owner != "" {
 		m.Footer = i18n.T(lang, "owner", e.Owner)
@@ -85,7 +90,7 @@ func render(e *Event, lang string) message {
 			if op != "" {
 				op += " — "
 			}
-			m.Lines = append(m.Lines, fmt.Sprintf("[%s] %s%s", i18n.T(lang, "level."+it.Level), op, it.Text))
+			m.Lines = append(m.Lines, fmt.Sprintf("[%s] %s%s", i18n.T(lang, "level."+it.Level), op, it.In(lang)))
 		}
 		if e.OmittedOutOfScope > 0 {
 			m.Lines = append(m.Lines, i18n.T(lang, "change.outofscope", e.OmittedOutOfScope))

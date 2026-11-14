@@ -113,6 +113,9 @@ func validate(c *Config) []string {
 		if !slices.Contains(levels, n.MinLevel) {
 			add("%s : min_level %q inconnu (valeurs possibles : %s)", where, n.MinLevel, strings.Join(levels, ", "))
 		}
+		if n.Digest != nil {
+			n.Digest.validate(where, add)
+		}
 	}
 	groups := map[string]bool{}
 	for i, g := range c.Groups {

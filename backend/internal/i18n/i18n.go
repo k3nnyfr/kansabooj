@@ -24,6 +24,11 @@ var catalog = map[string]map[string]string{
 		"level.warn":        "ATTENTION",
 		"level.info":        "INFO",
 		"owner":             "Équipe : %s",
+		"digest.title":      "Kansabooj : %d évolution(s) sur %d API(s)",
+		"digest.since":      "Récapitulatif depuis le %s",
+		"digest.line":       "[%s] %s — %s : %s",
+		"digest.more":       "… et %d autre(s) évolution(s)",
+		"button.open":       "Ouvrir Kansabooj",
 	},
 	"en": {
 		"change.title":      "%s: %s",
@@ -44,6 +49,11 @@ var catalog = map[string]map[string]string{
 		"level.warn":        "WARNING",
 		"level.info":        "INFO",
 		"owner":             "Team: %s",
+		"digest.title":      "Kansabooj: %d change(s) across %d API(s)",
+		"digest.since":      "Digest since %s",
+		"digest.line":       "[%s] %s — %s: %s",
+		"digest.more":       "… and %d more change(s)",
+		"button.open":       "Open Kansabooj",
 	},
 }
 

@@ -193,6 +193,7 @@ type Notifier struct {
 	OnlyInScope *bool         `yaml:"only_in_scope"`
 	Language    string        `yaml:"language"` // fr | en, defaults to server.language
 	Subscribe   *Subscription `yaml:"subscribe"`
+	Digest      *Digest       `yaml:"digest"` // nil: one message per change
 }
 
 // Subscribed reports whether the notifier subscribed to the API's group or tags.
@@ -330,6 +331,9 @@ func applyDefaults(c *Config) {
 		if n.OnlyInScope == nil {
 			t := true
 			n.OnlyInScope = &t
+		}
+		if n.Digest != nil {
+			n.Digest.applyDefaults()
 		}
 	}
 	groups := map[string]*Group{}

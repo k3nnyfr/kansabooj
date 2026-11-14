@@ -83,7 +83,11 @@ Une API injoignable n'a pas « changé ». États distincts : `ok`, `changed`, `
 On notifie une erreur seulement après N échecs consécutifs (configurable), et une seule fois jusqu'au retour à la normale.
 
 ### 2.8 Specs multi-fichiers
-`$ref` externes (`./schemas/user.yaml`, URLs) → bundling avant normalisation (kin-openapi sait résoudre les refs externes).
+`$ref` externes (`./schemas/user.yaml`, URLs) → bundling avant normalisation. OpenAPI 3 : kin-openapi résout et
+internalise les refs (lecteur restreint, cf. §2.1). Swagger 2.0 : kin-openapi ne sait pas charger les refs externes d'un
+document v2 ; Kansabooj les remplace par leur contenu dans l'arbre JSON avant la conversion v2 → v3, une référence
+récursive (Pet → Owner → Pet) étant remontée une fois dans `#/definitions` (v0.6). `kansabooj diff` sur des fichiers
+locaux lit les fichiers référencés, uniquement sous le dossier du fichier racine.
 
 ### 2.9 YAML ou base de données pour la configuration ?
 
@@ -123,8 +127,9 @@ L'outil sert aussi à surveiller des **APIs internes**. Conséquences :
 ### 2.9 quater Langue
 Interface, notifications et messages disponibles en **français et anglais**, au choix : langue par défaut côté serveur
 (`server.language`), sélecteur par utilisateur dans le front (mémorisé dans le navigateur), langue par notifier (un channel
-anglophone et un francophone peuvent coexister). Limite assumée : les libellés détaillés des changements viennent d'oasdiff
-et n'existent qu'en anglais ; on stocke le `rule_id` pour pouvoir les traduire plus tard.
+anglophone et un francophone peuvent coexister). Les libellés détaillés des changements viennent d'oasdiff, qui n'existe
+qu'en anglais : Kansabooj fournit son propre catalogue français (825 messages, par `rule_id`, v0.6) et stocke les deux
+textes. Les changements enregistrés avant la v0.6 n'ont que leur texte d'origine.
 
 ### 2.10 Build vs buy — l'existant (revu le 2026-11-14)
 - **Moteurs de diff open source** (briques, pas des produits) : **oasdiff** (Go, ~300 règles, utilisé ici comme bibliothèque),
@@ -198,8 +203,9 @@ Voir `backend/internal/store/migrations/{postgres,sqlite}/`. En résumé :
 - `snapshots` — une ligne **par version distincte** d'une API (pas par check)
 - `checks` — journal léger de chaque exécution (statut, durée, http, erreur) — purgé après N jours
 - `changes` — un passage snapshot N-1 → N, compteurs par niveau, version from/to, acquittement
-- `change_items` — chaque changement unitaire oasdiff (id de règle, niveau, méthode, path, texte, in_scope)
-- `notifications` — envoi par notifier, statut, tentatives
+- `change_items` — chaque changement unitaire oasdiff (id de règle, niveau, méthode, path, texte anglais et français, in_scope)
+- `notifications` — envoi par notifier, statut, tentatives ; `queued` = en attente du prochain récapitulatif
+- `digest_runs` — dernière échéance de récapitulatif traitée par notifier (un seul envoi par échéance)
 
 ## 6. API REST interne (consommée par le front)
 
@@ -210,7 +216,8 @@ Voir `backend/internal/store/migrations/{postgres,sqlite}/`. En résumé :
 | GET | `/api/apis/{id}/timeline` | changes paginés (la timeline) |
 | GET | `/api/changes/{id}` | détail d'un changement + items |
 | GET | `/api/snapshots/{id}/spec?form=raw\|normalized` | télécharger une version |
-| GET | `/api/apis/{id}/diff?from=&to=` | diff entre deux snapshots arbitraires |
+| GET | `/api/apis/{id}/snapshots` | versions distinctes d'une API |
+| GET | `/api/apis/{id}/compare?from=&to=` | diff entre deux versions arbitraires : changements oasdiff + diff ligne à ligne |
 | POST | `/api/apis/{id}/check` | check manuel |
 | POST | `/api/changes/{id}/ack` | acquitter (utilisateur = header SSO) |
 | POST | `/api/admin/reload` | recharger le YAML |

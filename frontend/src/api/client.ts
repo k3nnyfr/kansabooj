@@ -77,7 +77,36 @@ export interface ChangeItem {
   method?: string
   path?: string
   in_scope: boolean
+  text: string // English (oasdiff)
+  text_fr?: string // French, absent for changes recorded before v0.6
+}
+
+export interface Snapshot {
+  id: number
+  fetched_at: string
+  version?: string
+  format: string
+  operation_count: number
+}
+
+export interface DiffLine {
+  op: '=' | '-' | '+'
+  old?: number
+  new?: number
   text: string
+}
+
+export interface Comparison {
+  from: { id: number; semantic: boolean }
+  to: { id: number; semantic: boolean }
+  summary: { version_from?: string; version_to?: string; errors: number; warns: number; infos: number; in_scope: number; items: ChangeItem[] }
+  text_diff: {
+    added: number
+    removed: number
+    truncated?: boolean
+    too_large?: boolean
+    hunks: { old_start: number; new_start: number; lines: DiffLine[] }[]
+  }
 }
 
 export interface ChangeDetail extends TimelineEntry {
@@ -148,5 +177,8 @@ export const api = {
   check: (id: string) => request<CheckResult>('POST', `/api/apis/${enc(id)}/check`),
   ack: (changeId: number) => request<void>('POST', `/api/changes/${changeId}/ack`),
   ackAll: (id: string) => request<{ acknowledged: number }>('POST', `/api/apis/${enc(id)}/ack`),
+  snapshots: (id: string) => request<Snapshot[]>('GET', `/api/apis/${enc(id)}/snapshots`),
+  compare: (id: string, from: number, to: number) =>
+    request<Comparison>('GET', `/api/apis/${enc(id)}/compare?from=${from}&to=${to}`),
   specUrl: (snapshotId: number, form: 'raw' | 'normalized') => `/api/snapshots/${snapshotId}/spec?form=${form}`,
 }

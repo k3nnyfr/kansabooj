@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -172,5 +173,103 @@ apis:
 	}
 	if got := names("b"); got != "platform" {
 		t.Errorf("b → %s (group notify: [] must override defaults)", got)
+	}
+}
+
+func TestDigest(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+	}))
+	defer srv.Close()
+	cfg, err := config.Parse([]byte(`
+server: { base_url: "https://k.example" }
+notifiers:
+  - name: daily
+    type: generic
+    url: "` + srv.URL + `"
+    min_level: info
+    digest: { every: daily, at: "08:00", timezone: Europe/Paris, immediate_level: error }
+apis:
+  - { id: px, name: Partner X, source: { url: "https://px.example/spec.json" }, notify: [daily] }
+  - { id: py, name: Partner Y, source: { url: "https://py.example/spec.json" }, notify: [daily] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st := storetest.Open(t)
+	defer st.Close()
+	st.SyncAPIs(ctx, cfg.APIs)
+	paris, _ := time.LoadLocation("Europe/Paris")
+	cur := time.Date(2026, 11, 13, 14, 0, 0, 0, paris) // vendredi 14:00
+	d, _ := NewDispatcher(st, func() *config.Config { return cfg }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.now = func() time.Time { return cur }
+
+	n := 0
+	change := func(apiID string, its []diff.Item) {
+		t.Helper()
+		n++
+		var prev *int64
+		if snaps, _ := st.ListSnapshots(ctx, apiID, 1); len(snaps) == 1 {
+			prev = &snaps[0].ID
+		}
+		body := []byte(apiID + strconv.Itoa(n))
+		id, err := st.SaveNewVersion(ctx, store.NewVersion{Check: store.CheckRecord{APIID: apiID, StartedAt: cur, Trigger: "t", Status: "changed"},
+			Raw: body, Normalized: body, RawMedia: "application/json", PrevSnapID: prev, Summary: &diff.Summary{Items: its}, Semantic: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		api, _ := cfg.API(apiID)
+		d.HandleOutcome(ctx, api, &monitor.Outcome{Status: monitor.StatusChanged, ChangeID: id, Summary: &diff.Summary{VersionFrom: "1", VersionTo: "2", Items: its}})
+	}
+	info := []diff.Item{{RuleID: "endpoint-added", Level: "info", InScope: true, Text: "endpoint added", TextFR: "endpoint ajouté"}}
+	warn := []diff.Item{{RuleID: "x", Level: "warn", InScope: true, Text: "w"}}
+
+	d.RunDigests(ctx, cur) // first run: records today's 08:00, nothing queued yet
+	change("px", info)
+	change("py", warn)
+	change("px", items) // breaking: immediate_level error → sent now
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"kind":"change"`) {
+		t.Fatalf("only the breaking change goes out immediately: %v", bodies)
+	}
+	d.RunDigests(ctx, cur.Add(time.Hour)) // still before tomorrow 08:00
+	if len(bodies) != 1 {
+		t.Fatalf("digest sent too early: %d", len(bodies))
+	}
+	cur = time.Date(2026, 11, 14, 8, 0, 30, 0, paris)
+	d.RunDigests(ctx, cur)
+	d.RunDigests(ctx, cur.Add(time.Minute)) // same due time: nothing more
+	if len(bodies) != 2 {
+		t.Fatalf("expected one digest, got %d messages", len(bodies)-1)
+	}
+	var dg struct {
+		Kind   string        `json:"kind"`
+		Title  string        `json:"title"`
+		Digest []DigestEntry `json:"digest"`
+	}
+	json.Unmarshal([]byte(bodies[1]), &dg)
+	if dg.Kind != KindDigest || len(dg.Digest) != 2 || !strings.Contains(dg.Title, "2 évolution(s) sur 2 API(s)") {
+		t.Errorf("digest = %s", bodies[1])
+	}
+	if dg.Digest[1].MaxLevel != "warn" || dg.Digest[0].Infos != 1 {
+		t.Errorf("entries = %+v", dg.Digest)
+	}
+	// rendered for chat platforms too
+	for _, typ := range []string{"slack", "googlechat", "teams"} {
+		e := &Event{Kind: KindDigest, Link: "https://k.example/", Digest: dg.Digest, Since: &cur}
+		b, err := payload(typ, "fr", e)
+		if err != nil || !strings.Contains(string(b), "Partner Y") || !strings.Contains(string(b), "Ouvrir Kansabooj") {
+			t.Errorf("%s : %s %v", typ, b, err)
+		}
+	}
+	// next day: nothing queued, nothing sent
+	d.RunDigests(ctx, cur.Add(24*time.Hour))
+	if len(bodies) != 2 {
+		t.Errorf("empty digest sent: %d", len(bodies))
 	}
 }

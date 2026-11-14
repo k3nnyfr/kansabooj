@@ -54,17 +54,17 @@
 - [x] CI Gitea Actions : tests SQLite + PostgreSQL, front, schémas, kustomize, image + scan Trivy + push registre
 - [x] Composant NetworkPolicy
 
-## v0.6 — Pistes
-- [ ] Diff libre entre deux versions arbitraires dans l'interface (vue côte à côte des specs normalisées)
-- [ ] Digest quotidien / hebdomadaire au lieu de notifications unitaires
-- [ ] Traduction française des libellés oasdiff (catalogue par `rule_id`)
-- [ ] Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
-- [ ] `$ref` externes en Swagger 2.0 ; `kansabooj diff` sur des specs multi-fichiers locales
+## v0.6 — Lecture des évolutions, récapitulatifs ✅ 2026-11-14
+- [x] Comparaison libre de deux versions dans l'interface (changements + vue côte à côte des specs normalisées),
+      route `GET /api/apis/{id}/compare` ; lien « Voir le diff » sur chaque évolution
+- [x] Récapitulatif quotidien / hebdomadaire par notifier (`digest`), avec envoi immédiat optionnel des ruptures
+      (`immediate_level`)
+- [x] Libellés des changements en français (catalogue de 825 messages oasdiff, couverture vérifiée par un test)
+- [x] `$ref` externes en Swagger 2.0 ; `kansabooj diff` sur des specs multi-fichiers locales
 
 ## Plus tard (selon retours)
-- Traduction française des libellés de changements oasdiff (catalogue par `rule_id`, oasdiff n'existant qu'en anglais)
+- Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)
 - `gateway.published_spec` : périmètre déduit du contrat publié + détection de drift amont ↔ publié (agnostique de la Gateway)
 - Autres formats : AsyncAPI, GraphQL SDL, WSDL (interface `Differ` par format)
-- Digest quotidien/hebdo au lieu de notifications unitaires
 - UI admin qui ouvre une MR sur le dépôt de config (plutôt qu'écrire en base)

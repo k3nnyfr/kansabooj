@@ -531,6 +531,55 @@
                 }
               }
             }
+          },
+          "digest": {
+            "description": "Regroupe les changements en un message quotidien ou hebdomadaire au lieu d'un message par changement. Les alertes de source injoignable restent immédiates.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "every"
+            ],
+            "properties": {
+              "every": {
+                "enum": [
+                  "daily",
+                  "weekly"
+                ],
+                "description": "fréquence du récapitulatif"
+              },
+              "at": {
+                "type": "string",
+                "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                "default": "08:00",
+                "description": "heure d'envoi (HH:MM) dans le fuseau timezone"
+              },
+              "day": {
+                "enum": [
+                  "monday",
+                  "tuesday",
+                  "wednesday",
+                  "thursday",
+                  "friday",
+                  "saturday",
+                  "sunday"
+                ],
+                "default": "monday",
+                "description": "jour d'envoi (weekly)"
+              },
+              "timezone": {
+                "type": "string",
+                "default": "Europe/Paris",
+                "description": "fuseau IANA"
+              },
+              "immediate_level": {
+                "enum": [
+                  "error",
+                  "warn",
+                  "info"
+                ],
+                "description": "un changement de ce niveau ou plus est envoyé tout de suite (ex. error : les ruptures n'attendent pas le récapitulatif)"
+              }
+            }
           }
         }
       }

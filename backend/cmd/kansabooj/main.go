@@ -20,6 +20,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // digest.timezone : image distroless sans base de fuseaux
 
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/diff"
@@ -323,7 +324,7 @@ func formatItem(it diff.Item) string {
 	if !it.InScope {
 		scope = " (hors périmètre)"
 	}
-	return fmt.Sprintf("[%s] %s%s%s", label, op, it.Text, scope)
+	return fmt.Sprintf("[%s] %s%s%s", label, op, it.In("fr"), scope) // CLI en français
 }
 
 func runServe(ctx context.Context, args []string) int {

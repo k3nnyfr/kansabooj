@@ -182,3 +182,16 @@ button.tag:hover { color: var(--accent); border-color: var(--accent); }
 .section-desc { font-weight: 400; }
 .head-tags { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .2rem 0; }
 .group-link { font-weight: 600; }
+
+/* Comparaison de deux versions */
+.compare-pick { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin: .5rem 0 1rem; }
+.compare-pick select { max-width: 100%; font: inherit; padding: .3rem .4rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+.compare-items { margin-bottom: .5rem; }
+.sbs { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); margin-bottom: .75rem; overflow-x: auto; }
+.sbs-hunk { padding: .3rem .6rem; border-bottom: 1px solid var(--border); background: var(--bg); }
+.sbs table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); font-size: .8rem; }
+.sbs td { padding: 0 .4rem; vertical-align: top; white-space: pre-wrap; word-break: break-all; }
+.sbs td.ln { width: 3.2rem; text-align: right; color: var(--muted); user-select: none; border-right: 1px solid var(--border); }
+.sbs td.del { background: var(--err-bg); }
+.sbs td.add { background: var(--ok-bg); }
+.sbs td.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--bg) 6px 12px); }

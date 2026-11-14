@@ -136,6 +136,38 @@ apis:
 	if s := call("GET", "/api/snapshots/"+itoa(int(ch.ToSnapshotID))+"/spec?form=raw", 200, nil); s != v2 {
 		t.Errorf("raw spec = %q", s)
 	}
+	// free comparison between two versions (here the only two, in reverse order)
+	var snaps []store.SnapshotRow
+	call("GET", "/api/apis/p/snapshots", 200, &snaps)
+	if len(snaps) != 2 || snaps[0].Version != "2" || snaps[1].Version != "1" {
+		t.Fatalf("snapshots = %+v", snaps)
+	}
+	var cmp struct {
+		Summary struct {
+			Errors int
+			Items  []struct {
+				RuleID string `json:"rule_id"`
+				Text   string `json:"text"`
+				TextFR string `json:"text_fr"`
+			} `json:"items"`
+		}
+		TextDiff struct {
+			Added, Removed int
+			Hunks          []struct{ Lines []struct{ Op, Text string } }
+		} `json:"text_diff"`
+	}
+	call("GET", "/api/apis/p/compare?from="+itoa(int(snaps[0].ID))+"&to="+itoa(int(snaps[1].ID)), 200, &cmp)
+	if cmp.Summary.Errors != 0 || cmp.TextDiff.Added == 0 || len(cmp.TextDiff.Hunks) == 0 {
+		t.Errorf("v2 → v1 adds an endpoint, nothing breaking: %+v", cmp)
+	}
+	for _, it := range cmp.Summary.Items {
+		if it.Text == "" || it.TextFR == "" {
+			t.Errorf("item sans libellé bilingue : %+v", it)
+		}
+	}
+	call("GET", "/api/apis/p/compare?from=1", 400, nil)
+	call("GET", "/api/apis/p/compare?from="+itoa(int(snaps[0].ID))+"&to=999", 404, nil)
+	call("GET", "/api/apis/nope/compare?from=1&to=2", 404, nil)
 	call("GET", "/api/changes/abc", 400, nil)
 	call("GET", "/api/changes/999", 404, nil)
 	call("POST", "/api/apis/nope/check", 404, nil)
