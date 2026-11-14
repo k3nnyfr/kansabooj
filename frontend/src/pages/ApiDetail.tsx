@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, type CheckResult, type TimelineEntry } from '../api/client'
+import { ApiDoc } from '../components/ApiDoc'
 import { CheckButton, Counts, ErrorHint, LevelBadge, StatusBadge, TagList } from '../components/common'
 import { useI18n } from '../i18n'
 
@@ -9,8 +10,15 @@ export function ApiDetail() {
   const { id = '' } = useParams()
   const { t, relative, date } = useI18n()
   const qc = useQueryClient()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const focus = Number(params.get('change')) || undefined
+  const docShown = Number(params.get('doc')) || undefined
+  const showDoc = (snapshot?: number) =>
+    setParams((p) => {
+      if (snapshot === undefined) p.delete('doc')
+      else p.set('doc', String(snapshot))
+      return p
+    }, { replace: true })
   const [lastCheck, setLastCheck] = useState<CheckResult>()
 
   const detail = useQuery({ queryKey: ['api', id], queryFn: () => api.get(id), refetchInterval: 60_000 })
@@ -28,6 +36,7 @@ export function ApiDetail() {
   const { api: a, config, checks } = detail.data!
   const entries = timeline.data?.pages.flat() ?? []
   const scope = config.gateway?.exposed_operations ?? []
+  const hasDoc = a.format !== 'html' && a.snapshot_id !== undefined
 
   return (
     <>
@@ -80,12 +89,13 @@ export function ApiDetail() {
       )}
 
       <div className="grid">
+        <div className="main-col">
         <section>
           <h2>{t('detail.timeline')}</h2>
           {entries.length === 0 && !timeline.isLoading && <p className="muted">{t('detail.noChanges')}</p>}
           <ol className="timeline">
             {entries.map((e) => (
-              <TimelineCard key={e.id} apiID={a.id} entry={e} focused={e.id === focus} />
+              <TimelineCard key={e.id} apiID={a.id} entry={e} focused={e.id === focus} onDoc={hasDoc ? showDoc : undefined} />
             ))}
           </ol>
           {timeline.hasNextPage && (
@@ -94,6 +104,8 @@ export function ApiDetail() {
             </button>
           )}
         </section>
+        {hasDoc && <ApiDoc apiID={a.id} latest={a.snapshot_id!} shown={docShown} onShow={showDoc} />}
+        </div>
 
         <aside>
           <h2>{t('detail.scope')}</h2>
@@ -137,7 +149,7 @@ function CheckFeedback({ r }: { r: CheckResult }) {
   )
 }
 
-function TimelineCard({ apiID, entry: e, focused }: { apiID: string; entry: TimelineEntry; focused: boolean }) {
+function TimelineCard({ apiID, entry: e, focused, onDoc }: { apiID: string; entry: TimelineEntry; focused: boolean; onDoc?: (snapshot: number) => void }) {
   const { t, date, relative, lang } = useI18n()
   const qc = useQueryClient()
   const [open, setOpen] = useState(focused || (!e.acknowledged_at && !e.first_capture))
@@ -194,6 +206,7 @@ function TimelineCard({ apiID, entry: e, focused }: { apiID: string; entry: Time
               )}
               <a href={api.specUrl(e.to_snapshot_id, 'normalized')} target="_blank" rel="noreferrer">{t('detail.spec')}</a>
               <a href={api.specUrl(e.to_snapshot_id, 'raw')} target="_blank" rel="noreferrer">{t('detail.specRaw')}</a>
+              {onDoc && e.semantic && <button className="link" onClick={() => onDoc(e.to_snapshot_id)}>{t('action.doc')}</button>}
               {e.from_snapshot_id && (
                 <Link to={`/apis/${encodeURIComponent(apiID)}/compare?from=${e.from_snapshot_id}&to=${e.to_snapshot_id}`}>{t('action.compareThis')}</Link>
               )}

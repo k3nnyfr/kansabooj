@@ -68,6 +68,11 @@
 - [x] Actions groupées : vérifier maintenant, marquer comme vu (lignes affichées seulement, 4 en parallèle)
 - [x] « Changements en attente » (bleu), bouton « Vérifier maintenant » et colonnes à largeur fixe
 
+## v0.8 — Documentation des versions ✅ 2026-11-14
+- [x] Rendu Swagger UI de la spec normalisée sous la timeline (dernière version, ou une version de la timeline via
+      `?doc=`) : chargé à la demande, thème de l'interface (clair et sombre), en lecture seule (« Try it out » désactivé)
+- [x] Page élargie (1600 px) : les tags de la liste tiennent sur une ligne
+
 ## Plus tard (selon retours)
 - Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)

@@ -1,6 +1,6 @@
 # Kansabooj
 
-![version](https://img.shields.io/badge/version-v0.7-blue.svg)
+![version](https://img.shields.io/badge/version-v0.8-blue.svg)
 
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
@@ -22,6 +22,7 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Mode dégradé** | Une documentation en HTML seul est suivie par son texte visible (sans menus ni pied de page) ; les lignes ajoutées ou retirées sont montrées, à vérifier à la main. |
 | **Historique** | Chaque version distincte est conservée (spec brute et normalisée) ; la timeline de chaque API montre les évolutions, qui les a vues et quand. |
 | **Comparaison** | Deux versions quelconques d'une API comparées dans l'interface : changements classés, et specs normalisées côte à côte. |
+| **Documentation** | Rendu Swagger UI de la dernière version ou de n'importe quelle version conservée, aux couleurs de l'interface ; en lecture seule, aucun appel n'est envoyé aux APIs surveillées. |
 | **Notifications** | Google Chat, Slack, Teams, webhook générique signé HMAC ; filtrées par niveau et par périmètre, abonnements par groupe ou par tag, envoi idempotent avec relances. Au choix, un message par changement ou un récapitulatif quotidien ou hebdomadaire (les ruptures pouvant partir tout de suite). |
 | **Groupes et tags** | Regrouper les APIs par domaine ou par équipe, avec héritage des réglages (API > groupe > valeurs par défaut). |
 | **Accès authentifiés** | Clé d'API, basic, bearer, OAuth2 *client credentials*, mTLS ; les identifiants ne partent jamais vers un autre hôte que celui configuré. |
@@ -40,6 +41,8 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Découverte** : l'adresse donnée est une page Swagger-UI, la spec suivie est retrouvée derrière | **Mode dégradé** : une page HTML sans spec, comparée ligne à ligne |
 | ![Comparaison de PayFlow 3.0.0 et 3.1.0 : changements, puis specs normalisées côte à côte](docs/images/compare.png) | ![Page de statut : instance leader, APIs en échec](docs/images/status.png) |
 | **Comparaison** : deux versions au choix, changements classés et diff côte à côte | **Statut** : rôle de l'instance, APIs en échec et prochains checks |
+| ![Documentation Swagger UI de Kdo+ (Swagger 2.0), thème clair](docs/images/api-doc.png) | ![La même documentation en thème sombre](docs/images/api-doc-dark.png) |
+| **Documentation** : rendu Swagger UI de n'importe quelle version conservée, en lecture seule | … aux couleurs de l'interface, thème sombre compris |
 
 Les captures sont faites sur des APIs fictives servies en local (`scripts/screenshots/`), régénérables avec `task screenshots`.
 

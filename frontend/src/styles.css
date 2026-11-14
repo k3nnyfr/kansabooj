@@ -68,7 +68,7 @@ h2 { font-size: 1rem; margin: 1.5rem 0 .6rem; }
 .topbar nav { display: flex; gap: 1rem; }
 .topbar nav a { color: var(--muted); font-weight: 500; }
 .topbar nav a.active { color: var(--text); }
-.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+.container { max-width: 1600px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
 .footer { text-align: center; padding: 1rem; }
 
 .btn {
@@ -263,3 +263,13 @@ button.tag:hover { color: var(--accent); border-color: var(--accent); }
 .bulk-result { display: inline-flex; gap: .3rem; align-items: center; }
 .bulk-fail { color: var(--err); max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .container:has(.bulkbar) { padding-bottom: 6rem; }
+
+/* Documentation (Swagger UI) sous la timeline ; le thème de Swagger UI lui-même est dans components/swagger.css */
+.main-col { min-width: 0; }
+.apidoc { scroll-margin-top: 4rem; } /* sous la barre du haut collante */
+.apidoc-closed {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .65rem .9rem;
+}
+.apidoc-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.apidoc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .25rem .9rem .9rem; }

@@ -139,8 +139,8 @@ EOF
 )
 curl -sf -X POST -H 'X-Forwarded-User: marie.dupont' "http://127.0.0.1:$UI_PORT/api/changes/$id/ack" >/dev/null
 
-shot() { # shot <fichier> <chemin> <hauteur>
-  "$CHROME" --headless --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --lang=fr-FR \
+shot() { # shot <fichier> <chemin> <hauteur> [options Chromium…]
+  "$CHROME" --headless --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --lang=fr-FR "${@:4}" \
     --window-size="1280,$3" --virtual-time-budget=5000 --screenshot="$OUT/$1" \
     "http://127.0.0.1:$UI_PORT$2" >/dev/null 2>&1
   echo "  docs/images/$1"
@@ -153,3 +153,12 @@ shot api-discovery.png "/apis/colis-express" 630
 shot api-html.png "/apis/meteo-pro" 735
 shot status.png "/status" 480
 shot compare.png "/apis/payflow/compare" 1100
+# Documentation de Kdo+ (Swagger 2.0, timeline courte : la section est visible sans défiler), clair puis sombre
+doc=$(python3 - "$DB" <<'EOF'
+import sqlite3, sys
+print(sqlite3.connect(sys.argv[1]).execute(
+    "select max(id) from snapshots where api_id='kdo-plus'").fetchone()[0])
+EOF
+)
+shot api-doc.png "/apis/kdo-plus?doc=$doc" 700
+shot api-doc-dark.png "/apis/kdo-plus?doc=$doc" 700 --blink-settings=preferredColorScheme=0
