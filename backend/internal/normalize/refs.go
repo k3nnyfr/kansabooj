@@ -87,13 +87,26 @@ func inlineRefs(root map[string]any, o Options) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	in := &inliner{r: r, root: root, rootURL: withoutFragment(loc), docs: map[string]any{}, hoisted: map[string]string{}}
+	in := &inliner{r: r, root: root, rootURL: withoutFragment(loc), docs: map[string]any{}, hoisted: map[string]string{}, defs: map[string]any{}}
 	in.docs[in.rootURL.String()] = root
-	out, err := in.walk(root, in.rootURL, nil)
+	w, err := in.walk(root, in.rootURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	return out.(map[string]any), nil
+	out := w.(map[string]any)
+	// hoisted schemas are added once the whole tree is rebuilt: walk copies maps, so
+	// writing them into the root during the walk could miss an already copied definitions
+	if len(in.defs) > 0 {
+		defs, _ := out["definitions"].(map[string]any)
+		if defs == nil {
+			defs = map[string]any{}
+			out["definitions"] = defs
+		}
+		for name, d := range in.defs {
+			defs[name] = d
+		}
+	}
+	return out, nil
 }
 
 type inliner struct {
@@ -102,6 +115,7 @@ type inliner struct {
 	rootURL *url.URL
 	docs    map[string]any    // parsed documents by URL (without fragment)
 	hoisted map[string]string // absolute ref → name under #/definitions
+	defs    map[string]any    // hoisted schemas, added to #/definitions at the end
 }
 
 func (in *inliner) walk(n any, doc *url.URL, stack []string) (any, error) {
@@ -155,17 +169,12 @@ func (in *inliner) ref(ref string, doc *url.URL, stack []string) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			defs, _ := in.root["definitions"].(map[string]any)
-			if defs == nil {
-				defs = map[string]any{}
-				in.root["definitions"] = defs
-			}
-			defs[name] = map[string]any{} // placeholder: further loops reuse the name
+			in.defs[name] = map[string]any{} // placeholder: further loops reuse the name
 			w, err := in.walk(content, file, nil)
 			if err != nil {
 				return nil, err
 			}
-			defs[name] = w
+			in.defs[name] = w
 			return map[string]any{"$ref": "#/definitions/" + name}, nil
 		}
 	}
@@ -199,7 +208,7 @@ func (in *inliner) hoistName(target *url.URL) string {
 	}
 	defs, _ := in.root["definitions"].(map[string]any)
 	base := name
-	for i := 2; defs[name] != nil; i++ {
+	for i := 2; defs[name] != nil || in.defs[name] != nil; i++ {
 		name = base + strconv.Itoa(i)
 	}
 	return name
