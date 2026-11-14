@@ -102,15 +102,29 @@ task build                                             # interface + binaire bin
 ./bin/kansabooj serve --config config/apis.demo.yml    # http://localhost:8080, base SQLite dans data/
 ```
 
-La configuration de démo surveille deux APIs publiques, sans secret. Essai complet avec PostgreSQL : `podman-compose -f deploy/compose.yaml up --build`.
+La configuration de démo surveille deux APIs publiques, sans secret. Essai complet avec PostgreSQL, depuis les sources : `docker compose -f deploy/compose.yaml up --build`.
 
-## Déploiement Kubernetes / OpenShift
+## Déploiement
+
+### Kubernetes / OpenShift
 
 ```bash
 kubectl apply -k deploy/kubernetes/overlays/openshift    # ou overlays/kubernetes (Ingress)
 ```
 
 Il faut une base PostgreSQL 12 ou plus (exemple CloudNativePG fourni), un Secret pour les webhooks et les identifiants partenaires, et la configuration en ConfigMap, rechargée à chaud quand elle change. Plusieurs réplicas peuvent tourner : un seul planifie les checks. Base gérée par une équipe DBA sur un serveur tiers : overlay `openshift-external-db`, voir [le guide](docs/guides/postgresql-externe.md).
+
+### Docker Compose
+
+Pour un serveur unique, sans Kubernetes : Kansabooj et PostgreSQL, secrets dans un fichier `.env`, configuration montée et rechargée à chaud.
+
+```bash
+cp -r deploy/compose /opt/kansabooj && cd /opt/kansabooj
+cp .env.example .env && chmod 600 .env    # mot de passe de la base, webhooks, clés partenaires
+docker compose up -d                      # interface sur 127.0.0.1:8080, à publier derrière un reverse proxy
+```
+
+Secrets, reverse proxy et SSO, mises à jour, sauvegardes : [guide Docker Compose](docs/guides/docker-compose.md).
 
 ## Utilisation en CI
 
@@ -138,6 +152,7 @@ Les tests n'appellent jamais le réseau. Conventions et principes du projet : [C
 
 - [Architecture](docs/ARCHITECTURE.md) : besoin, choix techniques, normalisation, découverte, sécurité, marché
 - [Feuille de route](docs/ROADMAP.md) et [décisions d'architecture](docs/adr/)
+- [Docker Compose](docs/guides/docker-compose.md) : déploiement sur un serveur unique, reverse proxy, mises à jour, sauvegardes
 - [PostgreSQL externe](docs/guides/postgresql-externe.md) : serveur tiers, TLS, comptes et schéma dédiés, migrations séparées
 - [CI](docs/guides/ci.md) : validation des fragments de configuration, contrôle de contrat avant déploiement
 - [Exploitation](docs/guides/exploitation.md) : métriques Prometheus, alertes proposées

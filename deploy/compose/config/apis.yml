@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://git.k3nny.fr/k3nny/kansabooj/raw/branch/main/config/apis.schema.json
+# Exemple de configuration pour docker compose. Toutes les options : config/apis.example.yml du dépôt.
+include: [apis.d/*.yml]
+
+server:
+  base_url: https://kansabooj.example.com   # adresse publique, pour les liens des notifications
+  language: fr
+
+defaults:
+  interval: 6h
+  ignore: [$.servers]
+  notify: [paiement-chat]
+
+notifiers:
+  - name: paiement-chat
+    type: googlechat
+    url: ${GCHAT_WEBHOOK_PAIEMENT}
+    min_level: warn
+    digest: { every: daily, at: "08:30", immediate_level: error }   # les ruptures partent tout de suite
+
+apis:
+  - id: petstore
+    name: Swagger Petstore
+    source:
+      url: https://petstore3.swagger.io/
+      type: auto            # page Swagger-UI : la spec est retrouvée derrière

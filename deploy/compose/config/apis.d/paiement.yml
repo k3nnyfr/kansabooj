@@ -1,0 +1,22 @@
+# Fragment d'équipe : uniquement groups et apis (cf. config/apis.fragment.schema.json).
+groups:
+  - id: paiement
+    name: Partenaires paiement
+    owner: equipe-paiement
+    tags: [pci]
+
+apis:
+  - id: payflow
+    name: PayFlow Checkout
+    group: paiement
+    source:
+      url: https://api.payflow.example/v3/openapi.yaml
+    auth:
+      type: oauth2_client_credentials
+      token_url: https://auth.payflow.example/oauth/token
+      client_id: kansabooj
+      client_secret: ${PAYFLOW_CLIENT_SECRET}
+    gateway:
+      exposed_operations:
+        - POST /payments
+        - GET /payments/{paymentId}

@@ -13,6 +13,8 @@ files = {
     "config/apis.demo.yml": main,
     "deploy/kubernetes/base/apis.yml": main,
     "config/apis.d/equipe-crm.yml": fragment,
+    "deploy/compose/config/apis.yml": main,
+    "deploy/compose/config/apis.d/paiement.yml": fragment,
 }
 failed = False
 for path, schema in files.items():

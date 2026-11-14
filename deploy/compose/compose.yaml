@@ -1,0 +1,65 @@
+# Kansabooj avec Docker Compose : image publiée, PostgreSQL, configuration montée, secrets dans .env.
+# Guide : docs/guides/docker-compose.md
+#
+#   cp .env.example .env && chmod 600 .env      # puis renseigner les secrets
+#   docker compose up -d                        # ou podman-compose up -d
+#   docker compose logs -f kansabooj
+#
+# L'interface écoute sur 127.0.0.1:8080 : la publier derrière un reverse proxy (TLS, SSO), cf. le guide.
+name: kansabooj
+
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kansabooj
+      POSTGRES_DB: kansabooj
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kansabooj", "-d", "kansabooj"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  kansabooj:
+    image: git.k3nny.fr/k3nny/kansabooj:${KANSABOOJ_VERSION:-v0.6.1}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    # Secrets référencés en ${VAR} dans config/apis.yml (webhooks, clés partenaires) : uniquement dans .env.
+    env_file: [.env]
+    environment:
+      KANSABOOJ_CONFIG: /etc/kansabooj/apis.yml
+      KANSABOOJ_DB: postgres://kansabooj:${POSTGRES_PASSWORD}@db:5432/kansabooj?sslmode=disable
+      TZ: Europe/Paris
+    volumes:
+      # apis.yml + apis.d/*.yml : rechargés à chaud quand ils changent (pas besoin de redémarrer)
+      - ./config:/etc/kansabooj:ro
+      # fichiers secrets lus via ${file:/run/secrets/kansabooj/…} (certificats mTLS, CA d'entreprise…)
+      - ./secrets:/run/secrets/kansabooj:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/kansabooj", "healthcheck"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
+    # Aucune écriture disque : tout l'état est en base
+    read_only: true
+    user: "65532:65532"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    networks: [internal, outbound]
+
+volumes:
+  db: {}
+
+networks:
+  internal:
+    internal: true   # la base n'est joignable que par Kansabooj
+  outbound: {}       # sorties vers les APIs surveillées et les webhooks

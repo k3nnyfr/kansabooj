@@ -1,5 +1,6 @@
-# Essai local avec PostgreSQL : podman-compose -f deploy/compose.yaml up --build
-# (ou docker compose). Interface sur http://localhost:8080
+# Essai local depuis les sources (build de l'image, config de démo) : docker compose -f deploy/compose.yaml up --build
+# (ou podman-compose). Interface sur http://localhost:8080
+# Déploiement réel avec l'image publiée : deploy/compose/ et docs/guides/docker-compose.md
 services:
   db:
     image: docker.io/library/postgres:16-alpine

@@ -160,7 +160,8 @@ Cible principale : OpenShift / Kubernetes, avec **le moins d'adhérence possible
   l'interface et l'API. Bascule automatique si le leader disparaît (perte de session = perte du verrou).
 - Sondes : `/healthz` (liveness, processus) et `/readyz` (readiness, base joignable).
 - Manifests kustomize dans `deploy/kubernetes` (overlays `kubernetes` → Ingress, `openshift` → Route),
-  exemple de base CloudNativePG, `deploy/compose.yaml` pour un essai local.
+  exemple de base CloudNativePG, `deploy/compose.yaml` pour un essai local, `deploy/compose/` pour un déploiement
+  Docker Compose sur un serveur unique (image publiée, `kansabooj healthcheck` comme sonde, l'image n'ayant pas de curl).
 
 ## 3. Choix techniques
 

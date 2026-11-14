@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,6 +41,7 @@ Commandes :
   migrate    applique les migrations de schéma (compte avec droits DDL, cf. database.migrate: false)
   diff       compare deux specs (fichiers, URL ou kansabooj:<api-id>) — contrôle de contrat en CI
   token      génère un jeton d'API (token new <nom> --scopes read,validate)
+  healthcheck  interroge /readyz du serveur local (healthcheck de conteneur, l'image n'ayant ni curl ni wget)
 
 Options communes : --config (défaut config/apis.yml), --db (défaut : section database, sinon data/kansabooj.db)
 `
@@ -68,6 +70,8 @@ func main() {
 		code = runDiff(ctx, os.Args[2:])
 	case "token":
 		code = runToken(os.Args[2:])
+	case "healthcheck":
+		code = runHealthcheck(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -442,6 +446,45 @@ func runHistory(ctx context.Context, args []string) int {
 		}
 		fmt.Printf("#%-5d %s  %-22s cassant:%-3d attention:%-3d info:%-3d périmètre:%d\n",
 			c.ID, c.DetectedAt.Local().Format("2006-01-02 15:04"), ver, c.Errors, c.Warns, c.Infos, c.InScope)
+	}
+	return 0
+}
+
+// runHealthcheck exits 0 when the local server answers /readyz with 200 (database
+// reachable): container healthcheck for Docker Compose, the image having no curl.
+func runHealthcheck(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("healthcheck", flag.ExitOnError)
+	target := fs.String("url", "", "URL testée (défaut : http://127.0.0.1<port de KANSABOOJ_LISTEN>/readyz)")
+	fs.Parse(args)
+	u := *target
+	if u == "" {
+		listen := os.Getenv("KANSABOOJ_LISTEN")
+		if listen == "" {
+			listen = ":8080"
+		}
+		_, port, err := net.SplitHostPort(listen)
+		if err != nil || port == "" {
+			port = "8080"
+		}
+		u = "http://127.0.0.1:" + port + "/readyz"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "injoignable :", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		fmt.Fprintf(os.Stderr, "%s : HTTP %d %s\n", u, resp.StatusCode, strings.TrimSpace(string(b)))
+		return 1
 	}
 	return 0
 }

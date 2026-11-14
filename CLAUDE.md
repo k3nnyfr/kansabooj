@@ -23,7 +23,7 @@ Roadmap : `docs/ROADMAP.md`. Décisions d'architecture : `docs/adr/`.
 
 ```
 backend/
-  cmd/kansabooj/        CLI : validate | check | history | serve | migrate | diff | token
+  cmd/kansabooj/        CLI : validate | check | history | serve | migrate | diff | token | healthcheck
   internal/config/      chargement + validation de apis.yml, résolution ${ENV}, fusion defaults
   internal/discover/    page de doc (Swagger-UI, Redoc, springdoc…) → URL de spec ; scripts suivis seulement sur le même hôte
   internal/fetch/       client HTTP : proxy, CA, auth, ETag, deny_cidrs, timeouts
@@ -51,11 +51,12 @@ config/apis.fragment.schema.json  schéma des fragments d'équipe (apis.d/*.yml 
 config/apis.example.yml exemple exhaustif (toutes les options, secrets fictifs : ne s'exécute pas tel quel)
 config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Taskfile
 deploy/kubernetes/      base + overlays kubernetes (Ingress) / openshift (Route), exemple CloudNativePG
-deploy/compose.yaml     essai local avec PostgreSQL
+deploy/compose.yaml     essai local avec PostgreSQL (build depuis les sources)
+deploy/compose/         déploiement Docker Compose (image publiée, .env, config montée) — docs/guides/docker-compose.md
 .gitea/workflows/ci.yml CI Gitea Actions (rejouable localement : task ci [PG=postgres://…])
 scripts/check-schemas.py  validation JSON Schema des configs du dépôt
 scripts/screenshots.sh  captures du README (docs/images) sur les APIs fictives de scripts/screenshots/ (task screenshots)
-docs/guides/            postgresql-externe, ci, exploitation (métriques, alertes)
+docs/guides/            docker-compose, postgresql-externe, ci, exploitation (métriques, alertes)
 deploy/                 Dockerfile, compose, manifests
 docs/                   ARCHITECTURE.md, ROADMAP.md, adr/
 ```
