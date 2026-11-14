@@ -281,17 +281,36 @@ func isHTTPURL(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-// ParseIgnorePath parses the supported JSONPath subset: $.a.b, with * matching any key.
+// IgnoreDescendant is the path segment produced by "..": the rest of the path is matched
+// at any depth (including inside arrays).
+const IgnoreDescendant = "**"
+
+// ParseIgnorePath parses the supported JSONPath subset: $.a.b, with * matching any key,
+// and $..a (or $.a..b) matching a key at any depth below.
 func ParseIgnorePath(p string) ([]string, error) {
-	rest, ok := strings.CutPrefix(p, "$.")
-	if !ok || rest == "" {
-		return nil, fmt.Errorf("doit commencer par \"$.\" (ex : $.servers, $.paths.*.x-internal)")
+	rest, ok := strings.CutPrefix(p, "$")
+	if !ok || rest == "" || rest[0] != '.' {
+		return nil, fmt.Errorf("doit commencer par \"$.\" ou \"$..\" (ex : $.servers, $.paths.*.x-internal, $..example)")
 	}
-	parts := strings.Split(rest, ".")
-	for _, s := range parts {
-		if s == "" {
+	var parts []string
+	for rest != "" {
+		if strings.HasPrefix(rest, "..") {
+			parts, rest = append(parts, IgnoreDescendant), rest[2:]
+		} else {
+			rest = rest[1:] // "."
+		}
+		name, after, _ := strings.Cut(rest, ".")
+		if name == "" {
 			return nil, fmt.Errorf("segment vide")
 		}
+		if name == "*" && len(parts) > 0 && parts[len(parts)-1] == IgnoreDescendant {
+			return nil, fmt.Errorf("\"..*\" retirerait tout le document : nommer la clé (ex : $..example)")
+		}
+		parts = append(parts, name)
+		if after == "" && strings.HasSuffix(rest, ".") {
+			return nil, fmt.Errorf("segment vide")
+		}
+		rest = rest[len(name):]
 	}
 	return parts, nil
 }

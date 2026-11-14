@@ -1,6 +1,7 @@
 // Package normalize turns a raw spec (OpenAPI 3.x or Swagger 2.0, JSON or YAML)
 // into a canonical OpenAPI 3 JSON document whose hash only changes when the
-// contract changes: keys sorted, Swagger 2 converted, ignored paths removed.
+// contract changes: keys sorted, Swagger 2 converted, ignored paths removed, values of
+// enum / required sorted. Any change of this form must be applied by Upgrade too.
 package normalize
 
 import (
@@ -128,6 +129,7 @@ func NormalizeWith(raw []byte, o Options) (*Result, error) {
 		}
 		removePath(root, path)
 	}
+	sortSets(root) // enum / required: sets, whatever the order the producer emits
 
 	res.Canonical, err = canonicalJSON(root)
 	if err != nil {
@@ -243,8 +245,25 @@ func canonicalJSON(v any) ([]byte, error) {
 }
 
 func removePath(node any, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	if path[0] == config.IgnoreDescendant { // $..x : at this level and at any depth below
+		removePath(node, path[1:])
+		switch t := node.(type) {
+		case map[string]any:
+			for _, child := range t {
+				removePath(child, path)
+			}
+		case []any:
+			for _, child := range t {
+				removePath(child, path)
+			}
+		}
+		return
+	}
 	m, ok := node.(map[string]any)
-	if !ok || len(path) == 0 {
+	if !ok {
 		return
 	}
 	key, rest := path[0], path[1:]

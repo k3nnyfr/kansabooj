@@ -112,15 +112,15 @@ function Row({ e }: { e: JournalEntry }) {
   const changeLink = e.change_id ? `/apis/${encodeURIComponent(e.api_id)}?change=${e.change_id}` : undefined
   return (
     <tr className={e.status === 'error' || e.status === 'failed' ? 'row-alert' : ''}>
-      <td>
+      <td className="j-when">
         <div>{relative(e.at)}</div>
         <div className="small muted">{date(e.at)}</div>
       </td>
-      <td><span className={`badge ${kindBadge[k]}`}>{t(`journal.kind.${k}`)}</span></td>
-      <td className="ellipsis">
+      <td className="j-kind"><span className={`badge ${kindBadge[k]}`}>{t(`journal.kind.${k}`)}</span></td>
+      <td className="j-api ellipsis">
         <Link to={`/apis/${encodeURIComponent(e.api_id)}`} className="api-name" title={e.api_id}>{e.api_name}</Link>
       </td>
-      <td className="ellipsis">
+      <td className="j-by ellipsis">
         {e.kind === 'notification' ? (
           <span className="mono small" title={e.notifier}>{e.notifier}</span>
         ) : e.actor ? (
@@ -131,7 +131,7 @@ function Row({ e }: { e: JournalEntry }) {
           <span className="muted">{t(e.trigger === 'startup' ? 'journal.by.startup' : 'journal.by.scheduler')}</span>
         )}
       </td>
-      <td>
+      <td className="j-result">
         {e.kind === 'check' && (
           <span className="journal-result">
             <span className={`dot dot-${e.status}`} aria-hidden />

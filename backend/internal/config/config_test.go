@@ -306,3 +306,33 @@ notifiers: []`),
 		}
 	}
 }
+
+func TestParseIgnorePath(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string // segments joined by "/", "" = error
+	}{
+		{"$.servers", "servers"},
+		{"$.paths.*.x-internal", "paths/*/x-internal"},
+		{"$..example", "**/example"},
+		{"$.components..example", "components/**/example"},
+		{"$..x.y", "**/x/y"},
+		{"servers", ""},
+		{"$", ""},
+		{"$.", ""},
+		{"$.a.", ""},
+		{"$.a...b", ""},
+		{"$..*", ""},
+	} {
+		got, err := ParseIgnorePath(tc.in)
+		if tc.want == "" {
+			if err == nil {
+				t.Errorf("%q: expected an error, got %v", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || strings.Join(got, "/") != tc.want {
+			t.Errorf("%q = %v, %v; want %s", tc.in, got, err, tc.want)
+		}
+	}
+}

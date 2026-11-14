@@ -15,7 +15,7 @@
       "description": "Chemins retirés avant comparaison (anti-bruit). Sous-ensemble JSONPath : $.a.b, * = n'importe quelle clé.",
       "items": {
         "type": "string",
-        "pattern": "^\\$\\.[^.]+(\\.[^.]+)*$"
+        "pattern": "^\\$(\\.\\.?[^.]+)+$"
       },
       "examples": [
         [

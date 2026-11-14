@@ -86,7 +86,7 @@ function Shell() {
             <rect width="32" height="32" rx="7" fill="var(--accent)" />
             <path d="M7 20h4l3-9 4 13 3-7h4" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Kansabooj
+          <span className="brand-name">Kansabooj</span>
         </NavLink>
         <nav>
           <NavLink to="/" end>{t('nav.apis')}</NavLink>
@@ -94,9 +94,11 @@ function Shell() {
           <NavLink to="/status">{t('nav.status')}</NavLink>
         </nav>
         <span className="spacer" />
-        {meta.data && meta.data.user !== 'anonymous' && <span className="small muted">{meta.data.user}</span>}
-        <button className="btn btn-ghost" onClick={() => setLang(lang === 'fr' ? 'en' : 'fr')} lang={lang === 'fr' ? 'en' : 'fr'}>
-          {t('lang.switch')}
+        {meta.data && meta.data.user !== 'anonymous' && <span className="small muted topbar-user">{meta.data.user}</span>}
+        <button className="btn btn-ghost" onClick={() => setLang(lang === 'fr' ? 'en' : 'fr')} lang={lang === 'fr' ? 'en' : 'fr'}
+          aria-label={t('lang.switch')}>
+          <span className="wide-only">{t('lang.switch')}</span>
+          <span className="narrow-only" aria-hidden>{lang === 'fr' ? 'EN' : 'FR'}</span>
         </button>
         <button className="btn btn-ghost btn-icon" onClick={toggleTheme}
           title={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')} aria-label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}>

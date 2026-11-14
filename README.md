@@ -1,6 +1,6 @@
 # Kansabooj
 
-![version](https://img.shields.io/badge/version-v0.9-blue.svg)
+![version](https://img.shields.io/badge/version-v0.10-blue.svg)
 
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
@@ -46,6 +46,8 @@ Un partenaire publie une nouvelle version de son API : un paramètre devient obl
 | **Documentation** : rendu Swagger UI de n'importe quelle version conservée, en lecture seule | … aux couleurs de l'interface, thème sombre compris |
 | ![Journal : checks planifiés et manuels, acquittement, notifications envoyées ou en échec](docs/images/journal.png) | ![Liste des APIs en thème sombre](docs/images/apis-dark.png) |
 | **Journal** : qui a vérifié ou acquitté quoi, et ce que sont devenues les notifications | **Thème sombre** : suit le système, ou choisi avec le bouton en haut à droite |
+| ![Liste des APIs sur téléphone : une carte par API, barre de tri en haut](docs/images/apis-mobile.png) | ![Comparaison sur téléphone : diff unifié](docs/images/compare-mobile.png) |
+| **Sur mobile** : une carte par API, tri et filtres conservés, actions groupées en bas d'écran | … et un diff unifié, plus lisible qu'un côte à côte sur un écran étroit |
 
 Les captures sont faites sur des APIs fictives servies en local (`scripts/screenshots/`), régénérables avec `task screenshots`.
 
@@ -70,7 +72,7 @@ apis:
       exposed_operations:          # ce que la Gateway réexpose : le reste est « hors périmètre »
         - POST /payments
         - GET /payments/{paymentId}
-    ignore: [$.servers, $.info.description]
+    ignore: [$.servers, $.info.description, $..example]   # $..x : la clé x à toute profondeur
 ```
 
 Toutes les options sont décrites dans [`config/apis.example.yml`](config/apis.example.yml) et dans le JSON Schema [`config/apis.schema.json`](config/apis.schema.json). Pour tester une nouvelle source sans rien enregistrer : `kansabooj check --dry-run payflow`.

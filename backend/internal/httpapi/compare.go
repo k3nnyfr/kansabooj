@@ -56,6 +56,12 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		docs[i], sides[i] = body, compareSide{ID: id, Semantic: !strings.HasPrefix(media, "text/plain")}
+		if sides[i].Semantic { // versions stored by an older normalization: same form on both sides
+			if docs[i], _, err = normalize.Upgrade(body); err != nil {
+				s.internal(w, err)
+				return
+			}
+		}
 	}
 
 	var summary *diff.Summary

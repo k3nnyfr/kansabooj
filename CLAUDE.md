@@ -125,8 +125,11 @@ Les tests n'appellent jamais le réseau (httptest). Rechargement de config à ch
     utiliser `openapi3.DefaultReadFromURI` ni lire un chemin local à partir d'une spec. Seule exception :
     `normalize.Options.LocalDir`, réservé à la CLI (`kansabooj diff` sur les fichiers de l'utilisateur), qui limite la
     lecture au dossier du fichier racine (liens symboliques résolus) ; le serveur ne le renseigne jamais.
-17. Ne pas changer la forme canonique des specs existantes (hash) sans migration : tout changement de normalisation
-    produirait une « évolution » fantôme sur toutes les APIs. Le bundling n'est appliqué qu'aux specs ayant des `$ref` externes.
+17. Ne pas changer la forme canonique des specs existantes (hash) sans le reporter dans `normalize.Upgrade` : tout
+    changement de normalisation produirait sinon une « évolution » fantôme sur toutes les APIs. `Upgrade` doit rester
+    idempotent et transformer une ancienne forme canonique exactement comme `NormalizeWith` traite la spec brute ; le
+    check l'applique à la version courante (réécrite en place si équivalente). Le bundling n'est appliqué qu'aux specs
+    ayant des `$ref` externes.
 
 ## Conventions
 

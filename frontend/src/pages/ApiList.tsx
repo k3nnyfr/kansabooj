@@ -256,7 +256,7 @@ export function ApiList() {
                           <TriCheckbox label={t('bulk.selectGroup', { name: s.title })} checked={n === ids.length}
                             indeterminate={n > 0 && n < ids.length} onChange={(on) => setSelected(ids, on)} />
                         </th>
-                        <th colSpan={6}>
+                        <th colSpan={6} className="section-title">
                           {s.title} <span className="muted small">· {s.rows.length}</span>
                           {s.description && <div className="small muted section-desc">{s.description}</div>}
                         </th>
@@ -325,7 +325,7 @@ function Row({ a, showGroup, groupName, selected, onSelect, onGroup, onTag }: {
       <td className="select-cell">
         <input type="checkbox" checked={selected} onChange={(e) => onSelect(e.target.checked)} aria-label={t('bulk.selectRow', { name: a.name })} />
       </td>
-      <td>
+      <td className="c-api">
         <Link to={`/apis/${a.id}`} className="api-name">{a.name}</Link>
         <div className="small muted ellipsis">{[a.owner, a.id].filter(Boolean).join(' · ')}</div>
         {(showGroup && a.group) || a.tags.length ? (
@@ -335,10 +335,10 @@ function Row({ a, showGroup, groupName, selected, onSelect, onGroup, onTag }: {
           </span>
         ) : null}
       </td>
-      <td><StatusBadge status={a.status} /></td>
-      <td className="mono ellipsis" title={a.version}>{a.version || '—'}</td>
-      <td title={date(a.last_checked_at)}>{relative(a.last_checked_at)}</td>
-      <td>
+      <td className="c-status"><StatusBadge status={a.status} /></td>
+      <td className="c-version mono ellipsis" title={a.version}>{a.version || '—'}</td>
+      <td className="c-checked" title={date(a.last_checked_at)}>{relative(a.last_checked_at)}</td>
+      <td className="c-changes">
         {a.unacknowledged > 0 ? (
           <Link to={`/apis/${a.id}`} className="badge pending">
             {t(a.unacknowledged > 1 ? 'badge.pending.other' : 'badge.pending.one', { n: a.unacknowledged })}
@@ -348,7 +348,7 @@ function Row({ a, showGroup, groupName, selected, onSelect, onGroup, onTag }: {
           <span className="muted small" title={date(a.last_change_at)}>{a.last_change_at ? relative(a.last_change_at) : '—'}</span>
         )}
       </td>
-      <td className="right"><CheckButton id={a.id} /></td>
+      <td className="right c-action"><CheckButton id={a.id} /></td>
     </tr>
   )
 }

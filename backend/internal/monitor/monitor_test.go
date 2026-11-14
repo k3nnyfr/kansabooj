@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -8,8 +9,12 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
+	"git.k3nny.fr/kansabooj/internal/diff"
+	"git.k3nny.fr/kansabooj/internal/normalize"
+	"git.k3nny.fr/kansabooj/internal/store"
 	"git.k3nny.fr/kansabooj/internal/store/storetest"
 )
 
@@ -132,5 +137,74 @@ apis:
 	// dry run on the same content: unchanged, nothing written
 	if o, _ := m.Check(ctx, "orders", "manual", true); o.Status != StatusUnchanged {
 		t.Errorf("dry run status = %s", o.Status)
+	}
+}
+
+// A version stored before a normalization change (here: enum values sorted) must not
+// produce a "phantom" evolution: it is brought to the new form in place.
+func TestOlderNormalizationIsNotAChange(t *testing.T) {
+	spec := `openapi: 3.0.3
+info: { title: Tasks, version: "1.0" }
+paths:
+  /tasks:
+    get:
+      parameters: [{ name: status, in: query, schema: { type: string, enum: [RETRY, FAILURE, PENDING] } }]
+      responses: { "200": { description: ok } }
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/x-yaml")
+		w.Write([]byte(spec))
+	}))
+	defer srv.Close()
+	cfg, err := config.Parse([]byte(`
+apis:
+  - id: tasks
+    name: Tasks
+    source: { url: "` + srv.URL + `/openapi.yaml", type: openapi }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st := storetest.Open(t)
+	defer st.Close()
+	if err := st.SyncAPIs(ctx, cfg.APIs); err != nil {
+		t.Fatal(err)
+	}
+
+	// what an older Kansabooj stored: canonical JSON with the enum in the producer's order
+	cur, err := normalize.Normalize([]byte(spec), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := bytes.Replace(cur.Canonical, []byte(`"FAILURE",`), nil, 1)
+	legacy = bytes.Replace(legacy, []byte(`"PENDING",`), []byte(`"PENDING",`+"\n"+`                "FAILURE",`), 1)
+	if _, sha, _ := normalize.Upgrade(legacy); bytes.Equal(legacy, cur.Canonical) || sha != cur.SHA256 {
+		t.Fatalf("test setup: legacy form not built\n%s", legacy)
+	}
+	if _, err := st.SaveNewVersion(ctx, store.NewVersion{
+		Check:      store.CheckRecord{APIID: "tasks", StartedAt: time.Now().UTC(), Trigger: "schedule", Status: "changed"},
+		Raw:        []byte(spec),
+		RawMedia:   "application/yaml",
+		Normalized: legacy,
+		Snapshot:   store.Snapshot{Format: "openapi-3.0", Version: "1.0", Title: "Tasks", OperationCount: 1},
+		Summary:    &diff.Summary{Items: []diff.Item{}},
+		Semantic:   true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg, st)
+	for i := range 2 { // first: brought up to date in place; second: plain hash match
+		o, err := m.Check(ctx, "tasks", "manual", false)
+		if err != nil || o.Status != StatusUnchanged {
+			t.Fatalf("check %d: status = %s, err = %v / %v", i, o.Status, err, o.Err)
+		}
+	}
+	if tl, _ := st.Timeline(ctx, "tasks", 10); len(tl) != 1 {
+		t.Errorf("phantom change recorded: %+v", tl)
+	}
+	if s, _ := st.State(ctx, "tasks"); s.Current.NormalizedSHA256 != cur.SHA256 {
+		t.Errorf("current version not brought to the new form: %s", s.Current.NormalizedSHA256)
 	}
 }

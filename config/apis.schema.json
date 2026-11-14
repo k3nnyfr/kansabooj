@@ -15,16 +15,17 @@
     },
     "ignore": {
       "type": "array",
-      "description": "Chemins retirés avant comparaison (anti-bruit). Sous-ensemble JSONPath : $.a.b, * = n'importe quelle clé.",
+      "description": "Chemins retirés avant comparaison (anti-bruit). Sous-ensemble JSONPath : $.a.b, * = n'importe quelle clé, $..a = la clé a à toute profondeur (ex : $..example).",
       "items": {
         "type": "string",
-        "pattern": "^\\$\\.[^.]+(\\.[^.]+)*$"
+        "pattern": "^\\$(\\.\\.?[^.]+)+$"
       },
       "examples": [
         [
           "$.servers",
           "$.info.x-generated-at",
-          "$.paths.*.x-internal"
+          "$.paths.*.x-internal",
+          "$..example"
         ]
       ]
     },

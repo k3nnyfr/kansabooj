@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, type Comparison, type DiffLine, type Snapshot } from '../api/client'
 import { Counts, LevelBadge } from '../components/common'
+import { Segmented } from '../components/filters'
 import { useI18n } from '../i18n'
 
 // Free comparison between two versions of an API: semantic changes (oasdiff) and a
@@ -68,9 +69,13 @@ function VersionSelect({ label, value, list, onChange }: { label: string; value?
   )
 }
 
+// Below this width, two columns of code are unreadable: the unified layout is the default.
+const narrow = () => matchMedia('(max-width: 48rem)').matches
+
 function Result({ c, fromID, toID }: { c: Comparison; fromID: number; toID: number }) {
   const { t, lang } = useI18n()
   const [showOut, setShowOut] = useState(false)
+  const [view, setView] = useState<'split' | 'unified'>(narrow() ? 'unified' : 'split')
   const items = c.summary.items
   const outScope = items.filter((i) => !i.in_scope).length
   const shown = showOut ? items : items.filter((i) => i.in_scope)
@@ -109,8 +114,12 @@ function Result({ c, fromID, toID }: { c: Comparison; fromID: number; toID: numb
       </section>
 
       <section>
-        <h2>
-          {t('compare.document')} <span className="small muted">{t('compare.lines', { added: td.added, removed: td.removed })}</span>
+        <h2 className="compare-doc-head">
+          <span>
+            {t('compare.document')} <span className="small muted">{t('compare.lines', { added: td.added, removed: td.removed })}</span>
+          </span>
+          <Segmented label={t('compare.view')} value={view} onChange={setView}
+            options={[{ value: 'split', label: t('compare.view.split') }, { value: 'unified', label: t('compare.view.unified') }]} />
         </h2>
         <p className="small">
           <a href={api.specUrl(fromID, 'normalized')} target="_blank" rel="noreferrer">{t('compare.from')} #{fromID}</a>
@@ -119,9 +128,13 @@ function Result({ c, fromID, toID }: { c: Comparison; fromID: number; toID: numb
         </p>
         {td.too_large && <p className="callout callout-warn small">{t('compare.tooLarge')}</p>}
         {td.truncated && <p className="callout callout-warn small">{t('compare.truncated')}</p>}
-        {td.hunks.map((h, i) => (
-          <SideBySide key={i} lines={h.lines} oldStart={h.old_start} newStart={h.new_start} />
-        ))}
+        {td.hunks.map((h, i) =>
+          view === 'split' ? (
+            <SideBySide key={i} lines={h.lines} oldStart={h.old_start} newStart={h.new_start} />
+          ) : (
+            <Unified key={i} lines={h.lines} oldStart={h.old_start} newStart={h.new_start} />
+          ),
+        )}
       </section>
     </>
   )
@@ -160,6 +173,29 @@ function SideBySide({ lines, oldStart, newStart }: { lines: DiffLine[]; oldStart
               <td className={`code ${r.left ? (r.left.op === '-' ? 'del' : '') : 'empty'}`}>{r.left?.text}</td>
               <td className="ln">{r.right?.new ?? ''}</td>
               <td className={`code ${r.right ? (r.right.op === '+' ? 'add' : '') : 'empty'}`}>{r.right?.text}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// Unified layout: one column, removed then added lines, both line numbers in the gutter.
+function Unified({ lines, oldStart, newStart }: { lines: DiffLine[]; oldStart: number; newStart: number }) {
+  const { t } = useI18n()
+  return (
+    <div className="sbs unified">
+      <div className="sbs-hunk small muted">{t('compare.hunk', { old: oldStart, new: newStart })}</div>
+      <table>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i}>
+              <td className="ln">{l.old ?? ''}</td>
+              <td className="ln">{l.new ?? ''}</td>
+              <td className={`code ${l.op === '-' ? 'del' : l.op === '+' ? 'add' : ''}`}>
+                <span className="op" aria-hidden>{l.op === '=' ? ' ' : l.op}</span>{l.text}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -42,6 +42,7 @@ defaults:
   ignore:                 # chemins JSONPath exclus de la normalisation (anti-bruit)
     - $.servers
     - $.info.x-generated-at
+    # - $..example          # $..x : la clé x à toute profondeur (exemples régénérés à chaque publication)
 
 http:
   proxy: ${HTTPS_PROXY:-}           # vide = variables d'environnement standard

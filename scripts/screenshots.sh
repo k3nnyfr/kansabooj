@@ -161,9 +161,9 @@ curl -sf -X POST -H 'X-Forwarded-User: marie.dupont' "http://127.0.0.1:$UI_PORT/
 # … et elle a revérifié Kdo+ à la main (check manuel, visible dans le journal)
 curl -sf -X POST -H 'X-Forwarded-User: marie.dupont' "http://127.0.0.1:$UI_PORT/api/apis/kdo-plus/check" >/dev/null
 
-shot() { # shot <fichier> <chemin> <hauteur> [options Chromium…]
+shot() { # shot <fichier> <chemin> <hauteur> [options Chromium…] ; W=<largeur> (1600 par défaut)
   "$CHROME" --headless --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --lang=fr-FR "${@:4}" \
-    --window-size="1600,$3" --virtual-time-budget=5000 --screenshot="$OUT/$1" \
+    --window-size="${W:-1600},$3" --virtual-time-budget=5000 --screenshot="$OUT/$1" \
     "http://127.0.0.1:$UI_PORT$2" >/dev/null 2>&1
   echo "  docs/images/$1"
 }
@@ -177,6 +177,8 @@ shot status.png "/status" 480
 shot compare.png "/apis/payflow/compare" 1100
 shot journal.png "/journal" 900
 shot apis-dark.png "/" 790 --blink-settings=preferredColorScheme=0
+W=390 shot apis-mobile.png "/" 844
+W=390 shot compare-mobile.png "/apis/payflow/compare" 844
 # Documentation de Kdo+ (Swagger 2.0, timeline courte : la section est visible sans défiler), clair puis sombre
 doc=$(python3 - "$DB" <<'EOF'
 import sqlite3, sys

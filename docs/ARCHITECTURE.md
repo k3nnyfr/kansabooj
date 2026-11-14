@@ -41,8 +41,19 @@ internalisées : la forme canonique stockée est autonome.
 ### 2.2 Le bruit tuera l'outil avant les vrais changements
 Si on compare des octets, on aura des faux positifs en permanence : ordre des clés, `servers` qui varient selon l'environnement,
 timestamps injectés, exemples régénérés, whitespace, JSON ↔ YAML.
-**Décision** : on compare une **forme normalisée** (parse → conversion Swagger 2.0 → OAS 3 → tri des clés → suppression d'un jeu de champs ignorables configurable → sérialisation canonique) et on hashe ça.
-La spec brute est conservée à côté pour audit. Les règles d'ignore (`ignore:` en JSONPath) sont configurables par API.
+**Décision** : on compare une **forme normalisée** (parse → conversion Swagger 2.0 → OAS 3 → tri des clés → suppression d'un jeu de champs ignorables configurable → tri des valeurs de `enum` et `required` → sérialisation canonique) et on hashe ça.
+La spec brute est conservée à côté pour audit. Les règles d'ignore (`ignore:` en JSONPath : `$.a.b`, `*` pour n'importe
+quelle clé, `$..a` pour une clé à toute profondeur) sont configurables par API.
+
+`enum` et `required` sont des ensembles : certains producteurs les émettent dans un ordre qui change à chaque démarrage
+(ensemble Python sérialisé, cas de data.gouv.fr), ce qui ressemblait à une évolution. Leurs valeurs sont triées, sauf dans
+les données d'exemple (`example`, `examples`, `default`, `const`) et les extensions `x-*`. Quand l'exemple est lui-même
+tiré de cet ensemble, il change aussi : `ignore: [$..example]` le retire de la comparaison.
+
+**Évolution de la forme canonique** : un changement de normalisation ne doit pas créer d'« évolution fantôme » sur toutes
+les APIs. `normalize.Upgrade` ramène une version stockée à la forme actuelle ; avant de comparer, le check l'applique à la
+version courante, et si elle devient identique à la nouvelle capture, la version courante est réécrite en place
+(`Store.Renormalize`) sans créer de changement. La vue Comparaison applique `Upgrade` aux deux côtés.
 
 ### 2.3 `info.version` ment
 Beaucoup de partenaires ne bumpent jamais la version, ou la bumpent sans rien changer. La version est un **signal secondaire** ;

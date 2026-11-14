@@ -287,3 +287,105 @@ button.tag:hover { color: var(--accent); border-color: var(--accent); }
 .journal-table td { vertical-align: top; }
 .journal-result { display: inline; }
 .journal-error { font-family: var(--mono); word-break: break-word; }
+
+/* Diff unifié (comparaison) */
+.compare-doc-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.compare-doc-head .segmented { font-weight: 400; }
+.sbs.unified td.ln { width: 2.8rem; }
+.sbs.unified td.ln + td.ln { border-left: 0; }
+.sbs .op { display: inline-block; width: 1.1em; color: var(--muted); user-select: none; }
+
+/* Libellés courts / longs selon la largeur */
+.narrow-only { display: none; }
+
+/* ——— Mobile (≤ 48rem) ——— */
+@media (max-width: 48rem) {
+  .wide-only { display: none; }
+  .narrow-only { display: inline; }
+  .container { padding: 1rem .75rem 2.5rem; }
+  h1 { font-size: 1.25rem; }
+
+  .topbar { gap: .6rem; padding: .5rem .75rem; }
+  .topbar nav { gap: .75rem; overflow-x: auto; scrollbar-width: none; }
+  .topbar-user { display: none; }
+  .topbar nav { min-width: 0; }
+  .btn { padding: .35rem .65rem; }
+
+  /* Barres d'outils : contrôles sur toute la largeur, panneaux de filtre ancrés sur la barre */
+  .toolbar { gap: .5rem; }
+  .toolbar-controls { position: relative; justify-content: flex-start; width: 100%; }
+  .toolbar-controls .search { flex: 1 1 100%; min-width: 0; order: -1; }
+  .toolbar-controls > .select { flex: 1 1 auto; max-width: 100%; }
+  .facet { position: static; }
+  .facet-panel { left: 0; right: 0; max-width: none; }
+  .chips { margin: .6rem 0 .8rem; }
+
+  /* Liste des APIs : chaque ligne devient une carte ; l'en-tête devient une barre de tri */
+  .table-wrap:has(.api-table), .table-wrap:has(.journal-table) { overflow: visible; }
+  .api-table, .journal-table { display: block; min-width: 0; table-layout: auto; }
+  /* collant au niveau de thead : son parent (la table, en bloc) est assez haut pour qu'il suive le défilement */
+  .api-table thead { display: block; position: sticky; top: var(--topbar-h, 3rem); z-index: 5; }
+  .api-table colgroup, .journal-table colgroup { display: none; }
+  .api-table thead tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .9rem; padding: .5rem .75rem;
+    background: var(--surface);
+    box-shadow: inset 0 -1px 0 var(--border); border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .api-table thead th { position: static; padding: 0; box-shadow: none; background: none; }
+  .api-table thead th:last-child { display: none; }
+  .api-table tbody, .journal-table tbody, .journal-table thead { display: block; }
+  .journal-table thead { display: none; }
+  .api-table tbody tr {
+    display: grid; grid-template-columns: 1.6rem auto minmax(0, 1fr) auto; align-items: center;
+    gap: .35rem .75rem; padding: .7rem .75rem; border-bottom: 1px solid var(--border);
+  }
+  .api-table tbody tr:last-child { border-bottom: 0; }
+  .api-table td { display: block; padding: 0; border: 0; }
+  .api-table td.select-cell { grid-row: 1 / span 3; align-self: start; padding-top: .15rem; text-align: left; }
+  .api-table td.c-api { grid-column: 2 / -1; }
+  .api-table td.c-status { grid-column: 2; }
+  .api-table td.c-version { grid-column: 3; min-width: 0; }
+  .api-table td.c-checked { grid-column: 4; color: var(--muted); font-size: .85rem; text-align: right; white-space: nowrap; }
+  .api-table td.c-changes { grid-column: 2 / 4; min-width: 0; }
+  .api-table td.c-action { grid-column: 4; justify-self: end; }
+  .api-table td.c-changes:has(.muted) { color: var(--muted); }
+  .api-table tr.row-alert { box-shadow: inset 3px 0 0 var(--err); }
+  .api-table tr.row-selected { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .api-table tr.row-selected td { background: none; }
+  .api-table tr.row-alert td:first-child { box-shadow: none; }
+  .api-table tr.section-row { grid-template-columns: 1.6rem minmax(0, 1fr); background: var(--bg); padding: .5rem .75rem; }
+  .api-table tr.section-row th { padding: 0; background: none; }
+
+  /* Journal : cartes (quand · type / API / par qui / résultat) */
+  .journal-table tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .75rem;
+    padding: .65rem .75rem; border-bottom: 1px solid var(--border);
+  }
+  .journal-table td { display: block; padding: 0; border: 0; }
+  .journal-table td.j-when { grid-column: 1; display: flex; gap: .5rem; flex-wrap: wrap; align-items: baseline; }
+  .journal-table td.j-kind { grid-column: 2; grid-row: 1; }
+  .journal-table td.j-api, .journal-table td.j-by, .journal-table td.j-result { grid-column: 1 / -1; }
+  .journal-table td.j-by { font-size: .85rem; color: var(--muted); }
+  .journal-table tr.row-alert { box-shadow: inset 3px 0 0 var(--err); }
+  .journal-table tr.row-alert td:first-child { box-shadow: none; }
+  .journal-table td[colspan] { grid-column: 1 / -1; }
+
+  /* Détail d'une API */
+  .detail-head .actions { flex-wrap: wrap; width: 100%; }
+  .detail-head .mono, .plain .mono, .callout .mono { word-break: break-all; }
+  .tl-date { min-width: 0; }
+  .tl-head { padding: .6rem .75rem; gap: .5rem; }
+  .tl-body { padding: .6rem .75rem; }
+  .items .text { flex-basis: 100%; }
+  .timeline { padding-left: 1rem; }
+  .tl-marker { left: calc(-1rem - 7px); }
+
+  /* Barre d'actions groupées : pleine largeur en bas */
+  .bulkbar { left: .5rem; right: .5rem; bottom: .5rem; width: auto; max-width: none; gap: .4rem; padding: .5rem .6rem; }
+  .bulkbar strong { flex-basis: 100%; }
+  .bulk-fail { max-width: 100%; }
+}
+
+@media (max-width: 30rem) {
+  .brand-name { display: none; } /* le logo suffit : la navigation garde sa place */
+}

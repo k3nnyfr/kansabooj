@@ -455,6 +455,37 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 	return changeID, err
 }
 
+// Renormalize replaces the canonical form of a snapshot by an equivalent one produced by
+// a newer normalization (normalize.Upgrade), so that the API's hash matches the new form
+// without recording a change. It returns false, without touching anything, when another
+// snapshot of the API already has that form.
+func (s *Store) Renormalize(ctx context.Context, snapID int64, canonical []byte) (bool, error) {
+	done := false
+	err := s.tx(ctx, func(tx *rtx) error {
+		sum := sha256.Sum256(canonical)
+		sha := hex.EncodeToString(sum[:])
+		var taken int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM snapshots o JOIN snapshots s ON s.api_id = o.api_id
+WHERE s.id = ? AND o.id <> s.id AND o.normalized_sha256 = ?`, snapID, sha).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return nil
+		}
+		if _, err := putBlob(ctx, tx, canonical, "application/json"); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE snapshots SET normalized_sha256 = ? WHERE id = ?`, sha, snapID)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		done = n == 1
+		return nil
+	})
+	return done, err
+}
+
 // ChangeSummary is a timeline entry.
 type ChangeSummary struct {
 	ID                            int64

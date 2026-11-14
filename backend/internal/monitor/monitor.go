@@ -166,6 +166,26 @@ func (m *Monitor) Check(ctx context.Context, apiID, trigger string, dryRun bool)
 			return nil, err
 		}
 		prevHTML, curHTML := state.Current.Format == normalize.FormatHTML, spec.Format == normalize.FormatHTML
+		if !prevHTML && !curHTML {
+			// The current version may have been stored by an older normalization: bring it to
+			// today's canonical form first, so that only the contract is compared.
+			upgraded, sha, err := normalize.Upgrade(prevCanonical)
+			if err != nil {
+				return nil, err
+			}
+			if sha == spec.SHA256 {
+				out.Status, out.Duration = StatusUnchanged, time.Since(start)
+				if dryRun {
+					return out, nil
+				}
+				if _, err := m.store.Renormalize(ctx, state.Current.ID, upgraded); err != nil {
+					return nil, err
+				}
+				rec.Status, rec.Duration = StatusUnchanged, out.Duration
+				return out, m.store.RecordUnchanged(ctx, rec)
+			}
+			prevCanonical = upgraded
+		}
 		switch {
 		case prevHTML && curHTML:
 			out.Summary = diff.CompareText(prevCanonical, spec.Canonical)

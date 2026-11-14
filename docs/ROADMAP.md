@@ -80,6 +80,13 @@
 - [x] Bouton de thème clair / sombre (suit le système tant qu'aucun choix n'est mémorisé)
 - [x] Captures du README en 1600 px, avec le journal et le thème sombre
 
+## v0.10 — Mobile et ensembles non ordonnés ✅ 2026-11-15
+- [x] Interface utilisable sur téléphone : cartes pour la liste et le journal, barre de tri collante, filtres et
+      actions groupées adaptés, barre du haut compacte ; diff unifié (bascule « Côte à côte / Unifiée »)
+- [x] Normalisation : valeurs de `enum` et `required` triées (faux positifs quand le producteur les émet dans un ordre
+      variable, ex. data.gouv.fr) ; `normalize.Upgrade` + `Store.Renormalize` : pas d'évolution fantôme sur l'existant
+- [x] `ignore:` accepte `$..clé` (toute profondeur), ex. `$..example`
+
 ## Plus tard (selon retours)
 - Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)
