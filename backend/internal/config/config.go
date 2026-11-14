@@ -26,16 +26,39 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(time.Duration(d).String()) }
+func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(d.String()) }
+
+// String formats the duration without zero units: 6h, 1h30m, 45s.
+func (d Duration) String() string {
+	s := time.Duration(d).String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
 
 // Std returns the value as a time.Duration.
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
 type Config struct {
+	Server    Server     `yaml:"server"`
 	Defaults  Defaults   `yaml:"defaults"`
 	HTTP      HTTP       `yaml:"http"`
 	Notifiers []Notifier `yaml:"notifiers"`
 	APIs      []API      `yaml:"apis"`
+}
+
+// Server holds the settings of the `serve` command.
+type Server struct {
+	Listen         string   `yaml:"listen"`          // default :8080
+	BaseURL        string   `yaml:"base_url"`        // public URL of the UI, used for links in notifications
+	Language       string   `yaml:"language"`        // fr | en: default UI and notification language
+	UserHeader     string   `yaml:"user_header"`     // header set by the SSO reverse proxy (default X-Forwarded-User)
+	Concurrency    int      `yaml:"concurrency"`     // parallel checks (default 4)
+	CheckRetention Duration `yaml:"check_retention"` // how long check logs are kept (default 90 days)
 }
 
 type Defaults struct {
@@ -62,6 +85,7 @@ type Notifier struct {
 	Secret      string `yaml:"secret"`
 	MinLevel    string `yaml:"min_level"`
 	OnlyInScope *bool  `yaml:"only_in_scope"`
+	Language    string `yaml:"language"` // fr | en, defaults to server.language
 }
 
 type API struct {
@@ -122,7 +146,27 @@ const (
 	SourceAuto      = "auto"
 )
 
+// Languages supported by the UI and the notifications.
+var Languages = []string{"fr", "en"}
+
 func applyDefaults(c *Config) {
+	sv := &c.Server
+	if sv.Listen == "" {
+		sv.Listen = ":8080"
+	}
+	if sv.Language == "" {
+		sv.Language = "fr"
+	}
+	if sv.UserHeader == "" {
+		sv.UserHeader = "X-Forwarded-User"
+	}
+	if sv.Concurrency == 0 {
+		sv.Concurrency = 4
+	}
+	if sv.CheckRetention == 0 {
+		sv.CheckRetention = Duration(90 * 24 * time.Hour)
+	}
+	sv.BaseURL = strings.TrimRight(sv.BaseURL, "/")
 	d := &c.Defaults
 	if d.Interval == 0 {
 		d.Interval = Duration(6 * time.Hour)
@@ -146,6 +190,9 @@ func applyDefaults(c *Config) {
 		n := &c.Notifiers[i]
 		if n.MinLevel == "" {
 			n.MinLevel = "warn"
+		}
+		if n.Language == "" {
+			n.Language = sv.Language
 		}
 		if n.OnlyInScope == nil {
 			t := true

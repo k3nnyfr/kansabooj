@@ -3,6 +3,12 @@
 # Source de vérité versionnée (GitOps). La base ne contient que l'état et l'historique.
 # Les valeurs ${VAR} sont résolues depuis l'environnement au chargement. Jamais de secret en clair ici.
 
+server:
+  base_url: https://kansabooj.interne.example   # liens dans les notifications
+  language: fr              # fr | en : langue par défaut (interface et notifications)
+  user_header: X-Forwarded-User
+  concurrency: 4
+
 defaults:
   interval: 6h            # fréquence de check (Go duration)
   jitter: 10m             # décalage aléatoire pour ne pas tout lancer à la même seconde
@@ -29,6 +35,7 @@ notifiers:
     type: slack
     url: ${SLACK_WEBHOOK_INTEGRATION}
     min_level: error
+    language: en            # channel anglophone
   - name: catalogue-hook
     type: generic           # POST JSON brut, signé HMAC-SHA256 dans X-Kansabooj-Signature
     url: https://catalogue.interne.example/hooks/api-changes

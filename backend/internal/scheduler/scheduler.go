@@ -1,0 +1,279 @@
+// Package scheduler runs periodic checks, owns the live configuration (reload)
+// and wires check outcomes to notifications.
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"math/rand/v2"
+	"net/url"
+	"sort"
+	"sync"
+	"time"
+
+	"git.k3nny.fr/kansabooj/internal/config"
+	"git.k3nny.fr/kansabooj/internal/monitor"
+	"git.k3nny.fr/kansabooj/internal/notify"
+	"git.k3nny.fr/kansabooj/internal/store"
+)
+
+// ErrBusy is returned when a check of the same API is already running.
+var ErrBusy = errors.New("un check de cette API est déjà en cours")
+
+// ErrUnknownAPI is returned for an id absent from the configuration.
+var ErrUnknownAPI = errors.New("API absente de la configuration")
+
+type Scheduler struct {
+	path  string
+	store *store.Store
+	log   *slog.Logger
+	disp  *notify.Dispatcher
+	sem   chan struct{}
+	tick  time.Duration
+
+	mu        sync.Mutex
+	cfg       *config.Config
+	mon       *monitor.Monitor
+	next      map[string]time.Time
+	running   map[string]bool
+	hostLocks map[string]*sync.Mutex
+	lastTick  time.Time
+	loadedAt  time.Time
+}
+
+func New(path string, cfg *config.Config, st *store.Store, log *slog.Logger) (*Scheduler, error) {
+	s := &Scheduler{path: path, store: st, log: log, cfg: cfg, mon: monitor.New(cfg, st),
+		sem: make(chan struct{}, cfg.Server.Concurrency), tick: 10 * time.Second,
+		next: map[string]time.Time{}, running: map[string]bool{}, hostLocks: map[string]*sync.Mutex{}, loadedAt: time.Now()}
+	d, err := notify.NewDispatcher(st, s.Config, log)
+	if err != nil {
+		return nil, err
+	}
+	s.disp = d
+	return s, nil
+}
+
+// Config returns the live configuration.
+func (s *Scheduler) Config() *config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
+// Run schedules checks until ctx is cancelled.
+func (s *Scheduler) Run(ctx context.Context) error {
+	persisted, err := s.store.NextChecks(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	now := time.Now()
+	for _, a := range s.cfg.APIs {
+		if t, ok := persisted[a.ID]; ok && t.After(now) {
+			s.next[a.ID] = t
+		} else {
+			s.next[a.ID] = now.Add(s.jitter()) // spread the startup burst
+		}
+	}
+	s.mu.Unlock()
+
+	go s.disp.RetryLoop(ctx, 30*time.Second)
+	go s.purgeLoop(ctx)
+
+	t := time.NewTicker(s.tick)
+	defer t.Stop()
+	var wg sync.WaitGroup
+	for {
+		s.dispatchDue(ctx, &wg)
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Scheduler) dispatchDue(ctx context.Context, wg *sync.WaitGroup) {
+	s.mu.Lock()
+	now := time.Now()
+	s.lastTick = now
+	var due []string
+	for id, at := range s.next {
+		if !at.After(now) && !s.running[id] {
+			due = append(due, id)
+			s.running[id] = true
+		}
+	}
+	s.mu.Unlock()
+	sort.Strings(due)
+	for _, id := range due {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.run(ctx, id, "schedule")
+		}()
+	}
+}
+
+// TriggerCheck runs a check now, synchronously.
+func (s *Scheduler) TriggerCheck(ctx context.Context, apiID string) (*monitor.Outcome, error) {
+	s.mu.Lock()
+	if _, ok := s.cfg.API(apiID); !ok {
+		s.mu.Unlock()
+		return nil, ErrUnknownAPI
+	}
+	if s.running[apiID] {
+		s.mu.Unlock()
+		return nil, ErrBusy
+	}
+	s.running[apiID] = true
+	s.mu.Unlock()
+	return s.run(ctx, apiID, "manual")
+}
+
+// run executes one check; the caller has set running[apiID].
+func (s *Scheduler) run(ctx context.Context, apiID, trigger string) (*monitor.Outcome, error) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.running, apiID)
+		s.mu.Unlock()
+	}()
+
+	s.mu.Lock()
+	cfg, mon := s.cfg, s.mon
+	api, ok := cfg.API(apiID)
+	s.mu.Unlock()
+	if !ok {
+		return nil, ErrUnknownAPI // removed by a reload in the meantime
+	}
+
+	select {
+	case s.sem <- struct{}{}:
+		defer func() { <-s.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	hl := s.hostLock(api.Source.URL) // one fetch at a time per partner host
+	hl.Lock()
+	defer hl.Unlock()
+
+	o, err := mon.Check(ctx, apiID, trigger, false)
+
+	s.mu.Lock()
+	next := time.Now().Add(api.Interval.Std() + s.jitter())
+	if _, still := s.cfg.API(apiID); still {
+		s.next[apiID] = next
+	}
+	s.mu.Unlock()
+	if perr := s.store.SetNextCheck(context.WithoutCancel(ctx), apiID, next); perr != nil {
+		s.log.Error("persistance du prochain check", "api", apiID, "err", perr)
+	}
+
+	if err != nil {
+		s.log.Error("check en échec interne", "api", apiID, "err", err)
+		return nil, err
+	}
+	attrs := []any{"api", apiID, "trigger", trigger, "status", o.Status, "duration", o.Duration.Round(time.Millisecond)}
+	switch o.Status {
+	case monitor.StatusError:
+		s.log.Warn("check", append(attrs, "error_kind", o.ErrorKind, "err", o.Err, "consecutive", o.ConsecutiveErrors)...)
+	case monitor.StatusChanged:
+		s.log.Info("check", append(attrs, "change_id", o.ChangeID, "breaking", o.Summary.Errors, "in_scope", o.Summary.InScope)...)
+	default:
+		s.log.Debug("check", attrs...)
+	}
+	s.disp.HandleOutcome(context.WithoutCancel(ctx), api, o)
+	return o, nil
+}
+
+// Reload re-reads the configuration file. On error the running configuration is kept.
+func (s *Scheduler) Reload(ctx context.Context) error {
+	cfg, err := config.Load(s.path)
+	if err != nil {
+		return err
+	}
+	if err := s.store.SyncAPIs(ctx, cfg.APIs); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg, s.mon, s.loadedAt = cfg, monitor.New(cfg, s.store), time.Now()
+	keep := map[string]bool{}
+	for _, a := range cfg.APIs {
+		keep[a.ID] = true
+		if _, ok := s.next[a.ID]; !ok {
+			s.next[a.ID] = time.Now().Add(s.jitter())
+		}
+	}
+	for id := range s.next {
+		if !keep[id] {
+			delete(s.next, id)
+		}
+	}
+	s.log.Info("configuration rechargée", "apis", len(cfg.APIs))
+	return nil
+}
+
+// Status describes the scheduler for the status page.
+type Status struct {
+	LastTick   time.Time            `json:"last_tick"`
+	ConfigAt   time.Time            `json:"config_loaded_at"`
+	Running    []string             `json:"running"`
+	NextChecks map[string]time.Time `json:"next_checks"`
+}
+
+func (s *Scheduler) Status() Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := Status{LastTick: s.lastTick, ConfigAt: s.loadedAt, Running: []string{}, NextChecks: map[string]time.Time{}}
+	for id := range s.running {
+		st.Running = append(st.Running, id)
+	}
+	sort.Strings(st.Running)
+	for id, t := range s.next {
+		st.NextChecks[id] = t
+	}
+	return st
+}
+
+func (s *Scheduler) purgeLoop(ctx context.Context) {
+	for {
+		before := time.Now().Add(-s.Config().Server.CheckRetention.Std())
+		if n, err := s.store.PurgeChecks(ctx, before); err != nil {
+			s.log.Error("purge des checks", "err", err)
+		} else if n > 0 {
+			s.log.Info("purge des checks", "deleted", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(24 * time.Hour):
+		}
+	}
+}
+
+func (s *Scheduler) hostLock(rawURL string) *sync.Mutex {
+	host := rawURL
+	if u, err := url.Parse(rawURL); err == nil {
+		host = u.Host
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.hostLocks[host]
+	if !ok {
+		l = &sync.Mutex{}
+		s.hostLocks[host] = l
+	}
+	return l
+}
+
+// jitter must be called with s.mu held or before concurrent use.
+func (s *Scheduler) jitter() time.Duration {
+	j := s.cfg.Defaults.Jitter.Std()
+	if j <= 0 {
+		return 0
+	}
+	return rand.N(j)
+}

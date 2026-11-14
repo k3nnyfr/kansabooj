@@ -7,17 +7,24 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/diff"
+	"git.k3nny.fr/kansabooj/internal/httpapi"
 	"git.k3nny.fr/kansabooj/internal/monitor"
+	"git.k3nny.fr/kansabooj/internal/scheduler"
 	"git.k3nny.fr/kansabooj/internal/store"
 )
 
@@ -27,7 +34,7 @@ Commandes :
   validate   valide la configuration (schéma, variables d'environnement, références)
   check      exécute un check sur une ou plusieurs APIs (--all pour toutes, --dry-run pour ne rien enregistrer)
   history    affiche la timeline des évolutions d'une API
-  serve      serveur HTTP + scheduler (v0.2)
+  serve      serveur HTTP (API REST + interface) et vérifications périodiques
 
 Options communes : --config (défaut config/apis.yml), --db (défaut data/kansabooj.db)
 `
@@ -37,7 +44,7 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	var code int
@@ -49,8 +56,7 @@ func main() {
 	case "history":
 		code = runHistory(ctx, os.Args[2:])
 	case "serve":
-		fmt.Fprintln(os.Stderr, "serve : prévu en v0.2 (voir docs/ROADMAP.md)")
-		code = 2
+		code = runServe(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -95,7 +101,7 @@ func runValidate(args []string) int {
 		if a.Auth != nil {
 			auth = "auth " + a.Auth.Type
 		}
-		fmt.Printf("  - %-24s toutes les %-8s %-28s %s\n", a.ID, a.Interval.Std(), auth, a.Source.URL)
+		fmt.Printf("  - %-24s toutes les %-8s %-28s %s\n", a.ID, a.Interval.String(), auth, a.Source.URL)
 	}
 	return 0
 }
@@ -223,6 +229,81 @@ func formatItem(it diff.Item) string {
 		scope = " (hors périmètre)"
 	}
 	return fmt.Sprintf("[%s] %s%s%s", label, op, it.Text, scope)
+}
+
+func runServe(ctx context.Context, args []string) int {
+	f := newFlags("serve")
+	listen := f.fs.String("listen", "", "adresse d'écoute (défaut : server.listen, :8080)")
+	debug := f.fs.Bool("debug", false, "logs détaillés")
+	f.fs.Parse(args)
+
+	level := slog.LevelInfo
+	if *debug {
+		level = slog.LevelDebug
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+
+	cfg, ok := loadConfig(f.config)
+	if !ok {
+		return 1
+	}
+	st, err := openStore(ctx, f.db, cfg)
+	if err != nil {
+		log.Error("base de données", "err", err)
+		return 1
+	}
+	defer st.Close()
+	sch, err := scheduler.New(f.config, cfg, st, log)
+	if err != nil {
+		log.Error("initialisation", "err", err)
+		return 1
+	}
+
+	addr := cfg.Server.Listen
+	if *listen != "" {
+		addr = *listen
+	}
+	srv := &http.Server{Addr: addr, Handler: httpapi.New(sch, st, log).Handler(), ReadHeaderTimeout: 10 * time.Second}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				if err := sch.Reload(ctx); err != nil {
+					log.Error("rechargement refusé, configuration précédente conservée", "err", err)
+				}
+			}
+		}
+	}()
+	schedDone := make(chan error, 1)
+	go func() { schedDone <- sch.Run(ctx) }()
+	go func() {
+		<-ctx.Done()
+		shut, c := context.WithTimeout(context.Background(), 10*time.Second)
+		defer c()
+		srv.Shutdown(shut)
+	}()
+
+	log.Info("kansabooj démarré", "listen", addr, "apis", len(cfg.APIs), "version", httpapi.Version)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("serveur HTTP", "err", err)
+		cancel()
+		<-schedDone
+		return 1
+	}
+	cancel()
+	if err := <-schedDone; err != nil {
+		log.Error("scheduler", "err", err)
+		return 1
+	}
+	log.Info("arrêt propre")
+	return 0
 }
 
 func runHistory(ctx context.Context, args []string) int {

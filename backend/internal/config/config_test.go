@@ -117,3 +117,11 @@ func TestOrigin(t *testing.T) {
 		t.Errorf("origin = %q", got)
 	}
 }
+
+func TestDurationString(t *testing.T) {
+	for d, want := range map[time.Duration]string{6 * time.Hour: "6h", 90 * time.Minute: "1h30m", 45 * time.Second: "45s", 10 * time.Minute: "10m", 0: "0s"} {
+		if got := Duration(d).String(); got != want {
+			t.Errorf("%v → %q, want %q", d, got, want)
+		}
+	}
+}

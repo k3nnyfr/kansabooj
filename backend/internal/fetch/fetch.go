@@ -80,20 +80,9 @@ func New(h config.HTTP, api *config.API) (*Client, error) {
 		return nil, err
 	}
 
-	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	if h.CABundle != "" {
-		pool, err := x509.SystemCertPool()
-		if err != nil || pool == nil {
-			pool = x509.NewCertPool()
-		}
-		pem, err := os.ReadFile(h.CABundle)
-		if err != nil {
-			return nil, fmt.Errorf("lecture de http.ca_bundle : %w", err)
-		}
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("http.ca_bundle %s ne contient aucun certificat PEM", h.CABundle)
-		}
-		tlsCfg.RootCAs = pool
+	tlsCfg, err := tlsConfig(h)
+	if err != nil {
+		return nil, err
 	}
 	if api.Auth != nil && api.Auth.Type == "mtls" {
 		cert, err := tls.LoadX509KeyPair(api.Auth.CertFile, api.Auth.KeyFile)
@@ -162,6 +151,45 @@ func New(h config.HTTP, api *config.API) (*Client, error) {
 		},
 	}
 	return c, nil
+}
+
+func tlsConfig(h config.HTTP) (*tls.Config, error) {
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if h.CABundle != "" {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		pem, err := os.ReadFile(h.CABundle)
+		if err != nil {
+			return nil, fmt.Errorf("lecture de http.ca_bundle : %w", err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("http.ca_bundle %s ne contient aucun certificat PEM", h.CABundle)
+		}
+		tlsCfg.RootCAs = pool
+	}
+	return tlsCfg, nil
+}
+
+// OutboundTransport is the transport for other outbound calls (webhooks): same
+// proxy and CA as spec fetches, but no deny_cidrs since webhook targets are
+// configured by operators and may legitimately be internal.
+func OutboundTransport(h config.HTTP) (*http.Transport, error) {
+	tlsCfg, err := tlsConfig(h)
+	if err != nil {
+		return nil, err
+	}
+	proxy := http.ProxyFromEnvironment
+	if h.Proxy != "" {
+		pu, err := url.Parse(h.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("http.proxy invalide : %w", err)
+		}
+		proxy = http.ProxyURL(pu)
+	}
+	return &http.Transport{Proxy: proxy, TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true,
+		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second, IdleConnTimeout: 90 * time.Second}, nil
 }
 
 // Get fetches req.URL, honoring conditional headers.

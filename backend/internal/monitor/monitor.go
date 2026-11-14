@@ -48,6 +48,7 @@ type Outcome struct {
 	Err               error
 	ErrorKind         string
 	ConsecutiveErrors int
+	PrevStatus        string // API status before this check (pending | ok | error | auth_error | stale)
 	Duration          time.Duration
 }
 
@@ -68,6 +69,7 @@ func (m *Monitor) Check(ctx context.Context, apiID, trigger string, dryRun bool)
 		if state, err = m.store.State(ctx, apiID); err != nil {
 			return nil, err
 		}
+		out.PrevStatus = state.Status
 	}
 
 	fail := func(kind string, err error, httpStatus int) (*Outcome, error) {

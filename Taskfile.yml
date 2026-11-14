@@ -1,0 +1,105 @@
+# https://taskfile.dev — `task --list` pour la liste des tâches
+version: '3'
+
+vars:
+  CONFIG: '{{.CONFIG | default "config/apis.demo.yml"}}'
+  DB: '{{.DB | default "data/kansabooj.db"}}'
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  BIN: bin/kansabooj
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  validate:
+    desc: "Valide la configuration (CONFIG=... pour en choisir une autre)"
+    dir: backend
+    cmds:
+      - go run ./cmd/kansabooj validate --config ../{{.CONFIG}}
+
+  check:
+    desc: "Lance un check — ex : task check -- worldline-direct | task check -- --all | task check -- --dry-run mon-api"
+    dir: backend
+    cmds:
+      - go run ./cmd/kansabooj check --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+
+  history:
+    desc: "Timeline d'une API en CLI — ex : task history -- worldline-direct"
+    dir: backend
+    cmds:
+      - go run ./cmd/kansabooj history --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+
+  serve:
+    desc: "Serveur (API + scheduler) en développement, port 8080 — à combiner avec task ui:dev"
+    dir: backend
+    cmds:
+      - go run ./cmd/kansabooj serve --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+
+  ui:install:
+    desc: Installe les dépendances du front
+    dir: frontend
+    cmds: [npm ci]
+    status: ["test -d node_modules"]
+
+  ui:dev:
+    desc: "Front en mode développement (http://localhost:5173, proxy /api → :8080)"
+    dir: frontend
+    deps: [ui:install]
+    cmds: [npm run dev]
+
+  ui:build:
+    desc: Construit le front et le place pour l'embarquement dans le binaire
+    deps: [ui:install]
+    sources: [frontend/src/**/*, frontend/index.html, frontend/package-lock.json, frontend/vite.config.ts]
+    generates: [backend/internal/httpapi/web/dist/index.html]
+    cmds:
+      - npm --prefix frontend run build
+      - rm -rf backend/internal/httpapi/web/dist
+      - cp -r frontend/dist backend/internal/httpapi/web/dist
+
+  build:
+    desc: Binaire complet (front embarqué) dans bin/kansabooj
+    deps: [ui:build]
+    cmds:
+      - task: build:cli
+
+  build:cli:
+    desc: Binaire sans reconstruire le front
+    dir: backend
+    env: { CGO_ENABLED: '0' }
+    cmds:
+      - go build -trimpath -ldflags "-s -w -X git.k3nny.fr/kansabooj/internal/httpapi.Version={{.VERSION}}" -o ../{{.BIN}} ./cmd/kansabooj
+
+  test:
+    desc: Tests backend (avec détection de data races) et vérification de types du front
+    cmds:
+      - task: test:go
+      - task: lint:ui
+
+  test:go:
+    dir: backend
+    cmds: [go test -race ./...]
+
+  lint:
+    desc: gofmt, go vet et typecheck du front
+    cmds:
+      - task: lint:go
+      - task: lint:ui
+
+  lint:go:
+    dir: backend
+    cmds:
+      - test -z "$(gofmt -l .)" || (gofmt -l . && echo "fichiers non formatés (gofmt -w .)" && exit 1)
+      - go vet ./...
+
+  lint:ui:
+    dir: frontend
+    deps: [ui:install]
+    cmds: [npm run lint]
+
+  clean:
+    desc: Supprime binaires, base locale et builds
+    cmds:
+      - rm -rf bin data frontend/dist backend/internal/httpapi/web/dist

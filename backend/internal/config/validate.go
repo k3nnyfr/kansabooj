@@ -29,6 +29,15 @@ func validate(c *Config) []string {
 	var p []string
 	add := func(format string, args ...any) { p = append(p, fmt.Sprintf(format, args...)) }
 
+	if !slices.Contains(Languages, c.Server.Language) {
+		add("server.language : langue %q non supportée (fr, en)", c.Server.Language)
+	}
+	if c.Server.BaseURL != "" && !isHTTPURL(c.Server.BaseURL) {
+		add("server.base_url : URL invalide %q", c.Server.BaseURL)
+	}
+	if c.Server.Concurrency < 1 {
+		add("server.concurrency : doit être ≥ 1")
+	}
 	if c.HTTP.Proxy != "" {
 		if u, err := url.Parse(c.HTTP.Proxy); err != nil || u.Host == "" {
 			add("http.proxy : URL de proxy invalide %q", c.HTTP.Proxy)
@@ -54,6 +63,9 @@ func validate(c *Config) []string {
 		}
 		if !isHTTPURL(n.URL) {
 			add("%s : url absente ou invalide", where)
+		}
+		if !slices.Contains(Languages, n.Language) {
+			add("%s : language %q non supportée (fr, en)", where, n.Language)
 		}
 		if !slices.Contains(levels, n.MinLevel) {
 			add("%s : min_level %q inconnu (valeurs possibles : %s)", where, n.MinLevel, strings.Join(levels, ", "))

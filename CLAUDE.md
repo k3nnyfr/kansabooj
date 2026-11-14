@@ -20,7 +20,7 @@ Roadmap : `docs/ROADMAP.md`. Décisions d'architecture : `docs/adr/`.
 
 ```
 backend/
-  cmd/kansabooj/        CLI : validate | check | history | serve (v0.2)
+  cmd/kansabooj/        CLI : validate | check | history | serve
   internal/config/      chargement + validation de apis.yml, résolution ${ENV}, fusion defaults
   internal/discover/    URL de doc (swagger-ui, redoc, html) → URL de spec
   internal/fetch/       client HTTP : proxy, CA, auth, ETag, deny_cidrs, timeouts
@@ -28,34 +28,38 @@ backend/
   internal/diff/        wrapper oasdiff → []ChangeItem (+ calcul in_scope vs exposed_operations)
   internal/store/       accès SQLite, migrations, blobs content-addressed
   internal/monitor/     orchestration d'un check : fetch → normalize → diff → store (utilisé par CLI et scheduler)
-  internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine)
-  internal/notify/      notifiers slack | googlechat | teams | generic (HMAC), retry/backoff
-  internal/httpapi/     API REST /api/* consommée par le front + /healthz + /metrics
+  internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine), reload de config
+  internal/notify/      décide/rend/envoie : slack | googlechat | teams | generic (HMAC), idempotent, retry/backoff
+  internal/i18n/        catalogue FR/EN côté serveur (notifications)
+  internal/httpapi/     API REST /api/* + front embarqué (web/dist, sinon web/placeholder.html) + /healthz
 frontend/src/
-  pages/                ApiList, ApiTimeline, ChangeDetail, Diff, Status
-  components/           badges de statut, cartes timeline, vue diff
-  api/                  client typé de l'API REST
+  pages/                ApiList, ApiDetail (timeline + détail des changements), StatusPage
+  components/           badges, bouton de check, encart d'erreur
+  api/client.ts         client typé de l'API REST — à garder aligné avec internal/httpapi et internal/store
+  i18n.tsx              catalogue FR/EN du front + formatage des dates (Intl)
 config/apis.schema.json JSON Schema de la config (autocomplétion IDE) — à tenir à jour avec internal/config
 config/apis.example.yml exemple exhaustif (toutes les options, secrets fictifs : ne s'exécute pas tel quel)
-config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Makefile
+config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Taskfile
 deploy/                 Dockerfile, compose, manifests
 docs/                   ARCHITECTURE.md, ROADMAP.md, adr/
 ```
 
 ## Commandes
 
+Pas de Makefile : tout passe par [Task](https://taskfile.dev) (`Taskfile.yml`, `task --list`).
+
 ```bash
-make validate                          # valide la config (CONFIG=... pour en choisir une autre)
-make check API=worldline-direct        # check réel, persiste dans data/kansabooj.db
-make check API=--all
-make check API="--dry-run partner-x"   # tester une nouvelle source sans rien écrire
-cd backend && go test ./...            # tests (aucun appel réseau : httptest)
-cd backend && go vet ./... && gofmt -l .
-make build-cli                         # bin/kansabooj
-make dev-backend / dev-frontend / build   # v0.2 (serveur + front)
+task validate                        # valide config/apis.demo.yml (CONFIG=... pour une autre)
+task check -- worldline-direct       # check réel, persiste dans data/kansabooj.db ; -- --all ; -- --dry-run <id>
+task history -- worldline-direct
+task serve                           # API + scheduler sur :8080
+task ui:dev                          # front Vite sur :5173 (proxy /api → :8080)
+task test                            # go test -race ./... + typecheck du front
+task lint                            # gofmt, go vet, tsc
+task build                           # front embarqué + binaire bin/kansabooj (version = git describe)
 ```
 
-Commande `history <id>` : timeline d'une API en CLI.
+Les tests n'appellent jamais le réseau (httptest). Rechargement de config à chaud : `kill -HUP` ou `POST /api/admin/reload`.
 
 ## Principes non négociables
 
@@ -89,6 +93,8 @@ Commande `history <id>` : timeline d'une API en CLI.
   `context.Context` en premier paramètre de tout ce qui fait de l'I/O.
 - Tests : table-driven ; fixtures de specs dans `backend/internal/*/testdata/` (paires `before`/`after` pour le diff,
   pages HTML Swagger-UI / Redoc réelles pour `discover`). Pas d'appel réseau réel dans les tests (`httptest.Server`).
-- Front : composants fonctionnels, pas de state global hors TanStack Query, dates affichées en Europe/Paris.
+- Front : composants fonctionnels, pas de state global hors TanStack Query, dates formatées via `Intl` dans la langue choisie.
+- **i18n** : tout texte visible existe en `fr` et `en` (front : `src/i18n.tsx`, dont le type impose la parité des clés ;
+  serveur : `internal/i18n`). Les erreurs exposées au front portent une catégorie (`error_kind`) que le front traduit.
 - Toute modification de schéma = nouvelle migration `NNNN_description.sql`.
 - Décision structurante = nouvel ADR dans `docs/adr/` (format court : contexte / décision / conséquences).

@@ -94,13 +94,39 @@ Le YAML ne doit pas être un frein. Pour qu'une équipe non spécialiste puisse 
   nombre d'opérations, erreur d'auth explicite) **avant** de merger ;
 - messages d'erreur en français et actionnables dans le front (« clé d'API refusée (401) — vérifier `PARTNER_X_DOC_KEY` »).
 
-### 2.10 Build vs buy — à assumer explicitement
-- **Bump.sh / APIMatic / Optic** font de la surveillance de changements d'API, mais en SaaS (les contrats partenaires sortent de l'entreprise) ou orienté « mes propres APIs ».
-- **Le MVP minimal** serait un dépôt git + un pipeline CI planifié qui fait `curl` + `oasdiff changelog` + commit + webhook :
-  l'historique git *est* la timeline. Ça couvre ~60 % du besoin en une journée.
-  Ce qui justifie un outil dédié : la discovery Swagger-UI, la normalisation anti-bruit, le filtrage par périmètre exposé,
-  l'indicateur « vu / pas vu » et une timeline lisible par des non-devs.
-  → Si le budget est serré, commencer par le pipeline CI est un choix défendable.
+### 2.9 ter Usage interne : groupes, tags et profils réseau
+L'outil sert aussi à surveiller des **APIs internes**. Conséquences :
+- **Conflit avec l'anti-SSRF** : les APIs internes vivent précisément dans les plages bloquées par `deny_cidrs`.
+  On ne vide pas la liste : on introduit des **profils réseau** (`internet` par défaut : proxy + deny ; `internal` : sans proxy,
+  `allow_cidrs` explicites, CA interne). Une API n'atteint le réseau interne que si elle (ou son groupe) le déclare.
+- **Volume et organisation** : avec des dizaines d'APIs internes en plus, il faut des **groupes** (qui portent des valeurs par
+  défaut : owner, notify, auth, profil réseau) et des **tags** libres pour filtrer le front et router les notifications.
+- Valeur ajoutée côté interne : détecter qu'une équipe a cassé son contrat **avant** que ses consommateurs ne s'en aperçoivent.
+  À terme, l'outil pourrait aussi être branché en CI des producteurs (`kansabooj check --dry-run` sur la spec du build).
+
+### 2.9 quater Langue
+Interface, notifications et messages disponibles en **français et anglais**, au choix : langue par défaut côté serveur
+(`server.language`), sélecteur par utilisateur dans le front (mémorisé dans le navigateur), langue par notifier (un channel
+anglophone et un francophone peuvent coexister). Limite assumée : les libellés détaillés des changements viennent d'oasdiff
+et n'existent qu'en anglais ; on stocke le `rule_id` pour pouvoir les traduire plus tard.
+
+### 2.10 Build vs buy — l'existant (revu le 2026-11-14)
+- **Moteurs de diff open source** (briques, pas des produits) : **oasdiff** (Go, ~300 règles, utilisé ici comme bibliothèque),
+  OpenAPITools/openapi-diff (Java), Azure/openapi-diff (npm), Criteo openapi-comparator. Aucun ne planifie, n'historise
+  ni ne notifie : c'est à construire autour.
+- **Services hébergés de surveillance de specs tierces** : SchemaWatch, oasdiff Sync (alertes Slack, des auteurs d'oasdiff),
+  FlareCanary, Flowdev, des « actors » Apify payants à l'usage, et des moniteurs de pages génériques (PageCrawl) qui détectent
+  tout changement d'octet sans comprendre le contrat. Tous en **SaaS** : la liste des partenaires et les contrats sortent de
+  l'entreprise, pas d'auth sur réseau interne, pas de notion de périmètre réexposé dans une Gateway.
+- **Plateformes de doc / gouvernance** (Bump.sh, APIMatic, Optic) : orientées « mes propres APIs ».
+- **Le MVP minimal** reste un dépôt git + un pipeline CI planifié (`curl` + `oasdiff changelog` + commit + webhook) :
+  l'historique git *est* la timeline. Ce qui justifie un outil dédié : auto-hébergé, specs authentifiées et internes,
+  filtrage anti-bruit, filtrage par périmètre exposé, acquittement, timeline lisible par des non-devs.
+
+### 2.10 bis Mode API / « as-code »
+Voir **ADR 0003**. En bref : la configuration *est* déjà du code (YAML versionné) ; on la rend multi-équipes (`apis.d/`),
+on documente l'API REST (spec OpenAPI de Kansabooj lui-même) et on ajoute une validation de config appelable depuis la CI.
+On n'ouvre pas de CRUD d'APIs par HTTP (double source de vérité + SSRF) sans besoin concret.
 
 ### 2.11 Scheduling et haute dispo
 Une instance unique avec scheduler interne suffit largement (quelques centaines d'APIs, check toutes les heures = négligeable).
