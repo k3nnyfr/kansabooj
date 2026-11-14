@@ -1,0 +1,337 @@
+openapi: 3.0.3
+info:
+  title: Kansabooj API
+  version: "0.4"
+  description: |
+    API de Kansabooj : surveillance des contrats d'API partenaires et internes.
+
+    **Authentification** (selon `server.require_identity`) :
+    - jeton d'API : `Authorization: Bearer kbj_…` (généré par `kansabooj token new`, scopes `read`, `check`, `ack`, `validate`, `admin`) ;
+    - identité SSO posée par le reverse proxy (en-tête `server.user_header`, `X-Forwarded-User` par défaut) ;
+    - sans `require_identity`, les appels anonymes ont tous les droits (le proxy assure le contrôle d'accès).
+
+    La configuration (APIs, groupes, notifiers) n'est pas modifiable par l'API : elle est gérée « as-code »
+    (fichiers YAML versionnés, voir ADR 0003). L'API permet de la **valider** avant merge.
+  license: { name: Interne }
+servers:
+  - url: /
+security:
+  - bearerToken: []
+  - ssoUser: []
+  - {}
+tags:
+  - name: apis
+  - name: changes
+  - name: config
+  - name: service
+paths:
+  /healthz:
+    get:
+      tags: [service]
+      summary: Sonde de vivacité
+      security: []
+      responses:
+        "200": { description: Processus vivant, content: { text/plain: { schema: { type: string } } } }
+  /readyz:
+    get:
+      tags: [service]
+      summary: Sonde de disponibilité (base de données joignable)
+      security: []
+      responses:
+        "200": { description: Prêt, content: { text/plain: { schema: { type: string } } } }
+        "503": { description: Base de données indisponible }
+  /api/openapi.yaml:
+    get:
+      tags: [service]
+      summary: Cette description
+      security: []
+      responses:
+        "200": { description: Spécification OpenAPI, content: { application/yaml: { schema: { type: string } } } }
+  /api/meta:
+    get:
+      tags: [service]
+      summary: Version, langues, utilisateur courant, groupes et tags
+      responses:
+        "200":
+          description: Métadonnées
+          content: { application/json: { schema: { $ref: "#/components/schemas/Meta" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/status:
+    get:
+      tags: [service]
+      summary: État du planificateur et APIs en échec
+      responses:
+        "200":
+          description: Statut
+          content: { application/json: { schema: { $ref: "#/components/schemas/ServiceStatus" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/apis:
+    get:
+      tags: [apis]
+      summary: Liste des APIs surveillées
+      parameters:
+        - { name: group, in: query, schema: { type: string }, description: "id de groupe" }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: all, in: query, schema: { type: string, enum: ["1"] }, description: "inclure les APIs retirées de la configuration" }
+      responses:
+        "200":
+          description: APIs
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ApiRow" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/apis/{id}:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    get:
+      tags: [apis]
+      summary: Détail d'une API (configuration effective sans secret, derniers checks)
+      responses:
+        "200":
+          description: Détail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api: { $ref: "#/components/schemas/ApiRow" }
+                  config: { type: object, additionalProperties: true, description: "configuration effective, sans secret" }
+                  checks: { type: array, items: { $ref: "#/components/schemas/Check" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/apis/{id}/timeline:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    get:
+      tags: [changes]
+      summary: Évolutions d'une API, de la plus récente à la plus ancienne
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 30 } }
+        - { name: before, in: query, schema: { type: integer }, description: "pagination : id d'évolution" }
+      responses:
+        "200":
+          description: Timeline
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/TimelineEntry" } } } }
+  /api/apis/{id}/check:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    post:
+      tags: [apis]
+      summary: Lance un check immédiat (scope check)
+      responses:
+        "200":
+          description: Résultat
+          content: { application/json: { schema: { $ref: "#/components/schemas/CheckResult" } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Un check de cette API est déjà en cours, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/apis/{id}/ack:
+    parameters: [ { $ref: "#/components/parameters/ApiId" } ]
+    post:
+      tags: [changes]
+      summary: Marque toutes les évolutions de l'API comme vues (scope ack)
+      responses:
+        "200":
+          description: Nombre d'évolutions acquittées
+          content: { application/json: { schema: { type: object, properties: { acknowledged: { type: integer } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/changes/{id}:
+    parameters: [ { $ref: "#/components/parameters/ChangeId" } ]
+    get:
+      tags: [changes]
+      summary: Détail d'une évolution (changements unitaires classés)
+      responses:
+        "200":
+          description: Évolution
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeDetail" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/changes/{id}/ack:
+    parameters: [ { $ref: "#/components/parameters/ChangeId" } ]
+    post:
+      tags: [changes]
+      summary: Marque une évolution comme vue (scope ack)
+      responses:
+        "204": { description: Acquittée }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/snapshots/{id}/spec:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [changes]
+      summary: Contenu d'une version enregistrée
+      parameters:
+        - { name: form, in: query, schema: { type: string, enum: [normalized, raw], default: normalized } }
+        - { name: download, in: query, schema: { type: string, enum: ["1"] } }
+      responses:
+        "200":
+          description: Spécification (normalisée = OpenAPI 3 JSON canonique)
+          content:
+            application/json: { schema: { type: object } }
+            application/yaml: { schema: { type: string } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/config/validate:
+    post:
+      tags: [config]
+      summary: Valide une configuration avec le contexte du serveur, sans l'appliquer (scope validate)
+      description: |
+        Avec `fragment`, le corps remplace (ou ajoute) ce fichier inclus dans la configuration en service et
+        l'ensemble est validé : c'est l'appel à faire depuis la CI du dépôt de configuration d'une équipe.
+        Sans `fragment`, le corps est un fichier principal complet (ses `include` ne sont pas résolus).
+        Aucune URL déclarée n'est appelée.
+      parameters:
+        - { name: fragment, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._-]+\.ya?ml$' }, example: equipe-paiement.yml }
+      requestBody:
+        required: true
+        content: { application/yaml: { schema: { type: string } } }
+      responses:
+        "200":
+          description: Résultat de validation (valid=false avec la liste des problèmes)
+          content: { application/json: { schema: { $ref: "#/components/schemas/ValidationResult" } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/admin/reload:
+    post:
+      tags: [config]
+      summary: Recharge la configuration depuis le disque (scope admin)
+      responses:
+        "200":
+          description: Rechargée
+          content: { application/json: { schema: { type: object, properties: { apis: { type: integer } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { description: "Configuration invalide : l'ancienne est conservée", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+components:
+  securitySchemes:
+    bearerToken: { type: http, scheme: bearer, description: "jeton kbj_… (kansabooj token new)" }
+    ssoUser: { type: apiKey, in: header, name: X-Forwarded-User, description: "identité posée par le reverse proxy SSO" }
+  parameters:
+    ApiId: { name: id, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' } }
+    ChangeId: { name: id, in: path, required: true, schema: { type: integer } }
+  responses:
+    BadRequest: { description: Requête invalide, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unauthorized: { description: Identité absente ou jeton invalide, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Forbidden: { description: Scope insuffisant, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: Introuvable, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  schemas:
+    Error:
+      type: object
+      properties: { error: { type: string } }
+    Level: { type: string, enum: [error, warn, info], description: "error = cassant, warn = à surveiller" }
+    ApiStatus: { type: string, enum: [pending, ok, error, auth_error, stale] }
+    ApiRow:
+      type: object
+      required: [id, name, status, tags, network, unacknowledged, unacknowledged_breaking]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        owner: { type: string }
+        group: { type: string }
+        tags: { type: array, items: { type: string } }
+        network: { type: string }
+        source_url: { type: string, format: uri }
+        source_type: { type: string }
+        enabled: { type: boolean }
+        status: { $ref: "#/components/schemas/ApiStatus" }
+        last_error: { type: string }
+        last_error_kind: { type: string, enum: [network, http, auth, denied, too_large, invalid_spec, unsupported, config, diff] }
+        consecutive_errors: { type: integer }
+        last_checked_at: { type: string, format: date-time }
+        next_check_at: { type: string, format: date-time }
+        version: { type: string }
+        format: { type: string }
+        title: { type: string }
+        operation_count: { type: integer }
+        snapshot_id: { type: integer }
+        last_change_at: { type: string, format: date-time }
+        change_count: { type: integer }
+        unacknowledged: { type: integer }
+        unacknowledged_breaking: { type: integer }
+    Check:
+      type: object
+      properties:
+        started_at: { type: string, format: date-time }
+        duration_ms: { type: integer }
+        trigger: { type: string, enum: [schedule, manual, startup] }
+        status: { type: string, enum: [unchanged, changed, error] }
+        error_kind: { type: string }
+        http_status: { type: integer }
+        error: { type: string }
+    CheckResult:
+      type: object
+      properties:
+        status: { type: string, enum: [unchanged, changed, error] }
+        not_modified: { type: boolean }
+        duration_ms: { type: integer }
+        error: { type: string }
+        error_kind: { type: string }
+        change_id: { type: integer }
+        summary:
+          type: object
+          properties: { errors: { type: integer }, warns: { type: integer }, infos: { type: integer }, in_scope: { type: integer } }
+    TimelineEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        detected_at: { type: string, format: date-time }
+        from_snapshot_id: { type: integer }
+        to_snapshot_id: { type: integer }
+        version_from: { type: string }
+        version_to: { type: string }
+        errors: { type: integer }
+        warns: { type: integer }
+        infos: { type: integer }
+        in_scope: { type: integer }
+        in_scope_errors: { type: integer }
+        first_capture: { type: boolean }
+        acknowledged_at: { type: string, format: date-time }
+        acknowledged_by: { type: string }
+    ChangeItem:
+      type: object
+      properties:
+        rule_id: { type: string, description: "identifiant de règle oasdiff, ou api-version-changed / non-semantic-change / first-capture" }
+        level: { $ref: "#/components/schemas/Level" }
+        method: { type: string }
+        path: { type: string }
+        in_scope: { type: boolean }
+        text: { type: string }
+    ChangeDetail:
+      allOf:
+        - $ref: "#/components/schemas/TimelineEntry"
+        - type: object
+          properties:
+            api_id: { type: string }
+            items: { type: array, items: { $ref: "#/components/schemas/ChangeItem" } }
+    Group:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        owner: { type: string }
+        tags: { type: array, items: { type: string } }
+        network: { type: string }
+    Meta:
+      type: object
+      properties:
+        version: { type: string }
+        language: { type: string, enum: [fr, en] }
+        languages: { type: array, items: { type: string } }
+        user: { type: string }
+        groups: { type: array, items: { $ref: "#/components/schemas/Group" } }
+        tags: { type: array, items: { type: string } }
+    ServiceStatus:
+      type: object
+      properties:
+        scheduler:
+          type: object
+          properties:
+            instance: { type: string }
+            leader: { type: boolean }
+            last_tick: { type: string, format: date-time }
+            config_loaded_at: { type: string, format: date-time }
+            running: { type: array, items: { type: string } }
+            next_checks: { type: object, additionalProperties: { type: string, format: date-time } }
+        failing: { type: array, items: { $ref: "#/components/schemas/ApiRow" } }
+        total: { type: integer }
+    ValidationResult:
+      type: object
+      properties:
+        valid: { type: boolean }
+        mode: { type: string, enum: [main, fragment] }
+        problems: { type: array, items: { type: string } }
+        apis: { type: integer }
+        groups: { type: integer }

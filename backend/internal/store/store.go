@@ -19,7 +19,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"git.k3nny.fr/kansabooj/internal/config"
@@ -33,28 +34,39 @@ var ErrConcurrentUpdate = errors.New("version enregistrée entre-temps par un au
 var migrations embed.FS
 
 type Store struct {
-	db   *rdb
-	path string
+	db         *rdb
+	path       string
+	lockPrefix string // distinguishes several Kansabooj instances sharing one PostgreSQL database
+	applied    []string
 }
 
-// Open opens the database designated by dsn (PostgreSQL URL or SQLite file path,
-// see DialectOf) and applies pending migrations.
+// Options configures the database connection.
+type Options struct {
+	DSN             string // postgres:// URL, "postgres" (PG* environment variables) or SQLite file path
+	Schema          string // PostgreSQL: dedicated schema (search_path); created if Migrate
+	ApplicationName string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	// Migrate applies pending migrations at startup. When false (DDL handled by a DBA
+	// or a dedicated job running `kansabooj migrate`), Open fails if migrations are pending.
+	Migrate bool
+}
+
+// Open opens the database designated by dsn with default options and applies migrations.
 func Open(ctx context.Context, dsn string) (*Store, error) {
-	dialect := DialectOf(dsn)
+	return OpenWith(ctx, Options{DSN: dsn, Migrate: true})
+}
+
+// OpenWith opens the database and applies (or checks) migrations.
+func OpenWith(ctx context.Context, o Options) (*Store, error) {
+	dialect := DialectOf(o.DSN)
 	var db *sql.DB
 	var err error
 	if dialect == Postgres {
-		if dsn == "postgres" {
-			dsn = "" // libpq environment variables: PGHOST, PGUSER, PGPASSWORD, PGDATABASE…
-		}
-		db, err = sql.Open("pgx", dsn)
-		if err == nil {
-			db.SetMaxOpenConns(10)
-			db.SetConnMaxIdleTime(5 * time.Minute)
-			err = db.PingContext(ctx)
-		}
+		db, err = openPostgres(ctx, o)
 	} else {
-		db, err = sql.Open("sqlite", "file:"+dsn+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+		db, err = sql.Open("sqlite", "file:"+o.DSN+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 		if err == nil {
 			db.SetMaxOpenConns(1) // single writer; volume is tiny
 		}
@@ -62,12 +74,65 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connexion à la base (%s) : %w", dialect, err)
 	}
-	s := &Store{db: &rdb{DB: db, dialect: dialect}, path: dsn}
-	if err := s.migrate(ctx); err != nil {
+	s := &Store{db: &rdb{DB: db, dialect: dialect}, path: o.DSN, lockPrefix: o.Schema}
+	if dialect == Postgres && o.Schema != "" && o.Migrate {
+		// Create the schema only when missing: a DBA may have created it beforehand and
+		// granted it to an application role without CREATE privilege on the database.
+		var exists bool
+		err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, o.Schema).Scan(&exists)
+		if err == nil && !exists {
+			_, err = db.ExecContext(ctx, `CREATE SCHEMA "`+o.Schema+`"`) // name validated by config (^[a-z_][a-z0-9_]*$)
+		}
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("schéma %s : %w", o.Schema, err)
+		}
+	}
+	if err := s.migrate(ctx, !o.Migrate); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// minPostgresConns: leader lock + a per-API check lock + the check's own queries + an HTTP request.
+const minPostgresConns = 4
+
+func openPostgres(ctx context.Context, o Options) (*sql.DB, error) {
+	dsn := o.DSN
+	if dsn == "postgres" {
+		dsn = "" // libpq environment variables: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGSSLMODE…
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if o.Schema != "" {
+		cfg.RuntimeParams["search_path"] = o.Schema
+	}
+	if o.ApplicationName != "" {
+		cfg.RuntimeParams["application_name"] = o.ApplicationName
+	}
+	db := stdlib.OpenDB(*cfg)
+	// Session advisory locks pin connections (leader lock + one per running check):
+	// keep enough room for the queries themselves.
+	conns := o.MaxOpenConns
+	if conns == 0 {
+		conns = 10
+	}
+	db.SetMaxOpenConns(max(conns, minPostgresConns))
+	if o.MaxIdleConns > 0 {
+		db.SetMaxIdleConns(o.MaxIdleConns)
+	}
+	if o.ConnMaxLifetime > 0 {
+		db.SetConnMaxLifetime(o.ConnMaxLifetime)
+	}
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -78,7 +143,55 @@ func (s *Store) Dialect() string { return s.db.dialect }
 // Ping checks the database is reachable (readiness probe).
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
-func (s *Store) migrate(ctx context.Context) error {
+// Applied returns the migrations applied by this Open (empty when up to date).
+func (s *Store) Applied() []string { return s.applied }
+
+func (s *Store) migrate(ctx context.Context, checkOnly bool) error {
+	if s.db.dialect == Postgres && !checkOnly {
+		// Several replicas may start at once: serialize migrations.
+		conn, err := s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		key := s.lockName("migrations")
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, key); err != nil {
+			return fmt.Errorf("verrou de migration : %w", err)
+		}
+		defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, key)
+	}
+
+	dir := "migrations/" + s.db.dialect
+	paths, err := fs.Glob(migrations, dir+"/*.sql")
+	if err != nil {
+		return err
+	}
+	sort.Strings(paths)
+
+	if checkOnly {
+		done := map[string]bool{}
+		rows, err := s.db.QueryContext(ctx, `SELECT name FROM schema_migrations`)
+		if err != nil {
+			return fmt.Errorf("schéma non initialisé : exécuter « kansabooj migrate » avec un compte disposant des droits DDL (%w)", err)
+		}
+		for rows.Next() {
+			var n string
+			rows.Scan(&n)
+			done[n] = true
+		}
+		rows.Close()
+		var pending []string
+		for _, p := range paths {
+			if !done[path.Base(p)] {
+				pending = append(pending, path.Base(p))
+			}
+		}
+		if len(pending) > 0 {
+			return fmt.Errorf("migrations en attente (%s) : exécuter « kansabooj migrate » avec un compte disposant des droits DDL", strings.Join(pending, ", "))
+		}
+		return nil
+	}
+
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL)`); err != nil {
 		return err
 	}
@@ -86,12 +199,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE schema_migrations SET name = replace(name, 'migrations/', '') WHERE name LIKE 'migrations/%'`); err != nil {
 		return err
 	}
-	dir := "migrations/" + s.db.dialect
-	paths, err := fs.Glob(migrations, dir+"/*.sql")
-	if err != nil {
-		return err
-	}
-	sort.Strings(paths)
 	for _, p := range paths {
 		name := path.Base(p)
 		var n int
@@ -112,6 +219,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("migration %s : %w", name, err)
 		}
+		s.applied = append(s.applied, name)
 	}
 	return nil
 }

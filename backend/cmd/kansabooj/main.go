@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -35,8 +36,11 @@ Commandes :
   check      exécute un check sur une ou plusieurs APIs (--all pour toutes, --dry-run pour ne rien enregistrer)
   history    affiche la timeline des évolutions d'une API
   serve      serveur HTTP (API REST + interface) et vérifications périodiques
+  migrate    applique les migrations de schéma (compte avec droits DDL, cf. database.migrate: false)
+  diff       compare deux specs (fichiers, URL ou kansabooj:<api-id>) — contrôle de contrat en CI
+  token      génère un jeton d'API (token new <nom> --scopes read,validate)
 
-Options communes : --config (défaut config/apis.yml), --db (défaut data/kansabooj.db)
+Options communes : --config (défaut config/apis.yml), --db (défaut : section database, sinon data/kansabooj.db)
 `
 
 func main() {
@@ -57,6 +61,12 @@ func main() {
 		code = runHistory(ctx, os.Args[2:])
 	case "serve":
 		code = runServe(ctx, os.Args[2:])
+	case "migrate":
+		code = runMigrate(ctx, os.Args[2:])
+	case "diff":
+		code = runDiff(ctx, os.Args[2:])
+	case "token":
+		code = runToken(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -75,8 +85,9 @@ type common struct {
 func newFlags(name string) *common {
 	c := &common{fs: flag.NewFlagSet(name, flag.ExitOnError)}
 	c.fs.StringVar(&c.config, "config", env("KANSABOOJ_CONFIG", "config/apis.yml"), "fichier de configuration (env KANSABOOJ_CONFIG)")
-	c.fs.StringVar(&c.db, "db", env("KANSABOOJ_DB", "data/kansabooj.db"),
-		"base : URL postgres://… (ou \"postgres\" pour les variables PG*), sinon chemin SQLite (env KANSABOOJ_DB)")
+	c.fs.StringVar(&c.db, "db", os.Getenv("KANSABOOJ_DB"),
+		"base : URL postgres://… (ou \"postgres\" pour les variables PG*), ou chemin SQLite (env KANSABOOJ_DB).\n"+
+			"Par défaut : section database de la configuration, sinon data/kansabooj.db")
 	return c
 }
 
@@ -121,17 +132,75 @@ func runValidate(args []string) int {
 	return 0
 }
 
-func openStore(ctx context.Context, path string, cfg *config.Config) (*store.Store, error) {
-	if dir := filepath.Dir(path); store.DialectOf(path) == store.SQLite && dir != "." {
+const defaultSQLite = "data/kansabooj.db"
+
+// dbOptions resolves the database: --db / KANSABOOJ_DB, then the `database` section,
+// then a local SQLite file. Schema and pool settings of the section always apply.
+func dbOptions(flagDB string, cfg *config.Config) (store.Options, string) {
+	d := cfg.Database
+	o := store.Options{Schema: d.Schema, ApplicationName: d.ApplicationName, MaxOpenConns: d.MaxOpenConns,
+		MaxIdleConns: d.MaxIdleConns, ConnMaxLifetime: d.ConnMaxLifetime.Std(), Migrate: d.AutoMigrate()}
+	switch {
+	case flagDB != "":
+		o.DSN = flagDB
+	case d.Configured():
+		return withDSN(o, d.DSN()), d.Redacted()
+	default:
+		o.DSN = defaultSQLite
+	}
+	return o, redactDSN(o.DSN)
+}
+
+func withDSN(o store.Options, dsn string) store.Options { o.DSN = dsn; return o }
+
+func redactDSN(dsn string) string {
+	if store.DialectOf(dsn) != store.Postgres {
+		return "sqlite:" + dsn
+	}
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		return u.Redacted()
+	}
+	return dsn
+}
+
+func openStore(ctx context.Context, o store.Options, cfg *config.Config) (*store.Store, error) {
+	if dir := filepath.Dir(o.DSN); store.DialectOf(o.DSN) == store.SQLite && dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, err
 		}
 	}
-	st, err := store.Open(ctx, path)
+	st, err := store.OpenWith(ctx, o)
 	if err != nil {
 		return nil, err
 	}
-	return st, st.SyncAPIs(ctx, cfg.APIs)
+	if err := st.SyncAPIs(ctx, cfg.APIs); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return st, nil
+}
+
+func runMigrate(ctx context.Context, args []string) int {
+	f := newFlags("migrate")
+	f.fs.Parse(args)
+	cfg, ok := loadConfig(f.config)
+	if !ok {
+		return 1
+	}
+	o, target := dbOptions(f.db, cfg)
+	o.Migrate = true
+	st, err := store.OpenWith(ctx, o)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migration :", err)
+		return 1
+	}
+	defer st.Close()
+	if len(st.Applied()) == 0 {
+		fmt.Printf("✔ %s : schéma à jour\n", target)
+		return 0
+	}
+	fmt.Printf("✔ %s : %d migration(s) appliquée(s) : %s\n", target, len(st.Applied()), strings.Join(st.Applied(), ", "))
+	return 0
 }
 
 func runCheck(ctx context.Context, args []string) int {
@@ -157,9 +226,10 @@ func runCheck(ctx context.Context, args []string) int {
 	}
 
 	var st *store.Store
-	if _, err := os.Stat(f.db); !*dry || err == nil || store.DialectOf(f.db) == store.Postgres {
+	o, _ := dbOptions(f.db, cfg)
+	if _, err := os.Stat(o.DSN); !*dry || err == nil || store.DialectOf(o.DSN) == store.Postgres {
 		var err error
-		if st, err = openStore(ctx, f.db, cfg); err != nil {
+		if st, err = openStore(ctx, o, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "base de données :", err)
 			return 1
 		}
@@ -263,9 +333,10 @@ func runServe(ctx context.Context, args []string) int {
 	if !ok {
 		return 1
 	}
-	st, err := openStore(ctx, f.db, cfg)
+	o, target := dbOptions(f.db, cfg)
+	st, err := openStore(ctx, o, cfg)
 	if err != nil {
-		log.Error("base de données", "err", err)
+		log.Error("base de données", "target", target, "err", err)
 		return 1
 	}
 	defer st.Close()
@@ -309,7 +380,7 @@ func runServe(ctx context.Context, args []string) int {
 		srv.Shutdown(shut)
 	}()
 
-	log.Info("kansabooj démarré", "listen", addr, "apis", len(cfg.APIs), "version", httpapi.Version, "database", st.Dialect())
+	log.Info("kansabooj démarré", "listen", addr, "apis", len(cfg.APIs), "version", httpapi.Version, "database", target)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("serveur HTTP", "err", err)
 		cancel()
@@ -337,7 +408,8 @@ func runHistory(ctx context.Context, args []string) int {
 	if !ok {
 		return 1
 	}
-	st, err := openStore(ctx, f.db, cfg)
+	o, _ := dbOptions(f.db, cfg)
+	st, err := openStore(ctx, o, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "base de données :", err)
 		return 1

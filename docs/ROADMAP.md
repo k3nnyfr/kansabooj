@@ -35,14 +35,17 @@
       (`allow_cidrs`), CA dédiée — sans affaiblir le profil « internet » par défaut
 - [x] JSON Schema + `validate` à jour (groupe inexistant, héritage)
 
-## v0.3 bis — Mode API / as-code (ADR 0003)
-- [ ] Configuration multi-fichiers `config/apis.d/*.yml` (un fichier par équipe / groupe)
-- [ ] Spec OpenAPI de l'API Kansabooj servie sur `/api/openapi.yaml` (et Kansabooj surveillé par lui-même)
-- [ ] `POST /api/config/validate` pour valider une MR de config depuis la CI
-- [ ] Jetons d'API à portée limitée (`read`, `check`, `ack`, `admin`) pour les appels machine
-- [ ] Guide « contrôle de contrat en CI » pour les équipes productrices internes (`check --dry-run`)
+## v0.4 — PostgreSQL tiers & mode API / as-code (ADR 0003) ✅ 2026-11-14
+- [x] Section `database:` : serveur PostgreSQL tiers (TLS verify-full, certificat client, schéma dédié, pool),
+      `migrate: false` + commande `kansabooj migrate` (comptes séparés DBA), migrations sérialisées entre réplicas,
+      composant kustomize `external-db` + Job de migration, guide `docs/guides/postgresql-externe.md`
+- [x] Configuration multi-fichiers `include:` (un fragment `apis.d/<équipe>.yml` par équipe) + schéma de fragment
+- [x] Spec OpenAPI de l'API Kansabooj servie sur `/api/openapi.yaml` (test : chaque route est décrite)
+- [x] `POST /api/config/validate?fragment=…` pour valider une MR de config depuis la CI
+- [x] Jetons d'API à portée limitée (`read`, `check`, `ack`, `validate`, `admin`), `require_identity`, `admins`
+- [x] `kansabooj diff` (fichiers, URLs, `kansabooj:<api-id>`) + guide « Kansabooj dans la CI »
 
-## v0.4 — Robustesse
+## v0.5 — Robustesse
 - [ ] `discover` : Swagger-UI (initializer, swagger-config, `urls:` multiples), Redoc, heuristiques de chemins
 - [ ] Mode dégradé `html` (hash du texte extrait)
 - [ ] Specs multi-fichiers (`$ref` externes)

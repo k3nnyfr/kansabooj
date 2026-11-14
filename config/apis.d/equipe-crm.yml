@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../apis.fragment.schema.json
+# Fragment d'équipe : uniquement des groups et des apis. Notifiers, profils réseau et réglages
+# serveur restent dans le fichier principal. Validation en CI :
+#   curl -X POST -H "Authorization: Bearer $KANSABOOJ_TOKEN" --data-binary @apis.d/equipe-crm.yml \
+#        "$KANSABOOJ_SERVER/api/config/validate?fragment=equipe-crm.yml"
+groups:
+  - id: crm
+    name: CRM
+    owner: equipe-crm
+    tags: [interne]
+    network: internal
+
+apis:
+  - id: crm-contacts
+    name: CRM — Contacts
+    group: crm
+    source:
+      url: https://crm-contacts.interne.example/v3/api-docs
+      type: openapi

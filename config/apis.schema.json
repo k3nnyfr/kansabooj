@@ -199,6 +199,13 @@
     }
   },
   "properties": {
+    "include": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "fichiers fragments (globs relatifs à ce fichier) déclarant groups et apis — typiquement un fichier par équipe : apis.d/*.yml"
+    },
     "server": {
       "type": "object",
       "additionalProperties": false,
@@ -234,6 +241,136 @@
         "check_retention": {
           "$ref": "#/$defs/duration",
           "default": "2160h"
+        },
+        "require_identity": {
+          "type": "boolean",
+          "default": false,
+          "description": "refuse les appels sans identité SSO ni jeton"
+        },
+        "admins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "utilisateurs SSO autorisés sur les routes admin (avec require_identity)"
+        },
+        "tokens": {
+          "type": "array",
+          "description": "jetons d'API (générer avec « kansabooj token new »)",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "hash",
+              "scopes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "scopes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "read",
+                    "check",
+                    "ack",
+                    "validate",
+                    "admin"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Serveur PostgreSQL (tiers, managé, équipe DBA). Ignoré si KANSABOOJ_DB est défini, sauf schema et pool.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^postgres(ql)?://",
+          "description": "URL complète, alternative à host/port/name/user/password"
+        },
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 5432
+        },
+        "name": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string",
+          "description": "${ENV} ou ${file:...}, jamais en clair"
+        },
+        "sslmode": {
+          "enum": [
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ],
+          "description": "défaut : verify-full si sslrootcert, sinon require"
+        },
+        "sslrootcert": {
+          "type": "string"
+        },
+        "sslcert": {
+          "type": "string"
+        },
+        "sslkey": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]{0,62}$",
+          "description": "schéma dédié sur une base partagée"
+        },
+        "application_name": {
+          "type": "string",
+          "default": "kansabooj"
+        },
+        "connect_timeout": {
+          "$ref": "#/$defs/duration",
+          "default": "10s"
+        },
+        "max_open_conns": {
+          "type": "integer",
+          "minimum": 4,
+          "default": 10
+        },
+        "max_idle_conns": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5
+        },
+        "conn_max_lifetime": {
+          "$ref": "#/$defs/duration",
+          "default": "30m"
+        },
+        "migrate": {
+          "type": "boolean",
+          "default": true,
+          "description": "false : migrations exécutées à part (kansabooj migrate, compte DDL)"
         }
       }
     },

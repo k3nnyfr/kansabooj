@@ -105,8 +105,17 @@ func (l *Lock) Alive(ctx context.Context) error {
 
 var localLocks sync.Map // name → struct{}, for SQLite
 
+func (s *Store) lockName(name string) string {
+	if s.lockPrefix == "" {
+		return "kansabooj:" + name
+	}
+	return "kansabooj:" + s.lockPrefix + ":" + name
+}
+
 // TryLock acquires the named lock without waiting; ok is false when someone else holds it.
+// Names are scoped to the schema, so instances sharing a database do not interfere.
 func (s *Store) TryLock(ctx context.Context, name string) (lock *Lock, ok bool, err error) {
+	name = s.lockName(name)
 	if s.db.dialect != Postgres {
 		key := s.path + "\x00" + name
 		if _, held := localLocks.LoadOrStore(key, struct{}{}); held {

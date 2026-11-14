@@ -3,11 +3,15 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -30,6 +34,16 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 
 func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(d.String()) }
 
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	v, err := time.ParseDuration(s)
+	*d = Duration(v)
+	return err
+}
+
 // String formats the duration without zero units: 6h, 1h30m, 45s.
 func (d Duration) String() string {
 	s := time.Duration(d).String()
@@ -46,11 +60,17 @@ func (d Duration) String() string {
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
 type Config struct {
+	// Include lists glob patterns of fragment files (relative to the main file) each
+	// declaring `groups` and `apis` — typically one file per team (apis.d/*.yml).
+	Include []string `yaml:"include"`
+	baseDir string
+
 	// Files lists the files the configuration was built from (the YAML itself and
 	// every ${file:...} secret), so they can be watched for changes.
 	Files []string `yaml:"-"`
 
 	Server    Server     `yaml:"server"`
+	Database  Database   `yaml:"database"`
 	Defaults  Defaults   `yaml:"defaults"`
 	HTTP      HTTP       `yaml:"http"`
 	Notifiers []Notifier `yaml:"notifiers"`
@@ -62,6 +82,7 @@ type Config struct {
 // default values inherited by its APIs. API values win over group values, which
 // win over `defaults`.
 type Group struct {
+	File        string    `yaml:"-" json:"-"` // fragment the group comes from ("" = main file)
 	ID          string    `yaml:"id" json:"id"`
 	Name        string    `yaml:"name" json:"name"`
 	Description string    `yaml:"description" json:"description,omitempty"`
@@ -102,7 +123,25 @@ type Server struct {
 	UserHeader     string   `yaml:"user_header"`     // header set by the SSO reverse proxy (default X-Forwarded-User)
 	Concurrency    int      `yaml:"concurrency"`     // parallel checks (default 4)
 	CheckRetention Duration `yaml:"check_retention"` // how long check logs are kept (default 90 days)
+
+	// RequireIdentity rejects API calls carrying neither an SSO identity (UserHeader)
+	// nor a valid token. When false, anonymous callers get every right (the reverse
+	// proxy is then responsible for access control).
+	RequireIdentity bool     `yaml:"require_identity"`
+	Admins          []string `yaml:"admins"` // SSO users allowed to call admin endpoints when require_identity is set
+	Tokens          []Token  `yaml:"tokens"`
 }
+
+// Token is a machine credential (CI, integrations). Only its hash is configured;
+// generate one with `kansabooj token new <name>`.
+type Token struct {
+	Name   string   `yaml:"name"`
+	Hash   string   `yaml:"hash"`   // sha256:<hex>
+	Scopes []string `yaml:"scopes"` // read | check | ack | validate | admin
+}
+
+// Scopes known to the API.
+var Scopes = []string{"read", "check", "ack", "validate", "admin"}
 
 type Defaults struct {
 	Interval       Duration `yaml:"interval"`
@@ -173,6 +212,7 @@ func (n *Notifier) Subscribed(a *API) bool {
 }
 
 type API struct {
+	File     string    `yaml:"-" json:"-"` // fragment the API comes from ("" = main file)
 	ID       string    `yaml:"id" json:"id"`
 	Name     string    `yaml:"name" json:"name"`
 	Owner    string    `yaml:"owner" json:"owner,omitempty"`
@@ -254,6 +294,7 @@ func applyDefaults(c *Config) {
 		sv.CheckRetention = Duration(90 * 24 * time.Hour)
 	}
 	sv.BaseURL = strings.TrimRight(sv.BaseURL, "/")
+	c.Database.applyDefaults()
 	d := &c.Defaults
 	if d.Interval == 0 {
 		d.Interval = Duration(6 * time.Hour)
@@ -325,43 +366,175 @@ func applyDefaults(c *Config) {
 	}
 }
 
-// Load reads, expands ${...} references, applies defaults and validates the file.
-// All validation problems are returned at once as a *ValidationError.
-func Load(path string) (*Config, error) {
+// Load reads the configuration file and the fragments it includes, expands ${...}
+// references, applies defaults and validates the result. All problems are
+// returned at once as a *ValidationError.
+func Load(path string) (*Config, error) { return LoadWith(path, nil) }
+
+// LoadWith is Load where some fragments (keyed by base name) are replaced by, or
+// complemented with, the given contents — used to validate a proposed change of a
+// team's fragment against the live configuration.
+func LoadWith(path string, overrides map[string][]byte) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("lecture de la configuration : %w", err)
 	}
-	c, err := parse(raw)
-	if c != nil {
-		c.Files = append([]string{path}, c.Files...)
+	c, problems, err := decodeMain(raw, "")
+	if err != nil {
+		return nil, err
 	}
-	return c, err
+	c.Files = append([]string{path}, c.Files...)
+	c.baseDir = filepath.Dir(path)
+
+	frags, err := c.fragmentFiles()
+	if err != nil {
+		problems = append(problems, err.Error())
+	}
+	seen := map[string]bool{}
+	for _, f := range frags {
+		name := filepath.Base(f)
+		seen[name] = true
+		body, ok := overrides[name]
+		if !ok {
+			if body, err = os.ReadFile(f); err != nil {
+				problems = append(problems, fmt.Sprintf("%s : lecture impossible : %v", name, err))
+				continue
+			}
+			c.Files = append(c.Files, f)
+		}
+		problems = append(problems, c.addFragment(name, body)...)
+	}
+	for name, body := range overrides {
+		if !seen[name] {
+			problems = append(problems, c.addFragment(name, body)...)
+		}
+	}
+	return finish(c, problems)
 }
 
-// Parse is Load without the file read.
-func Parse(raw []byte) (*Config, error) { return parse(raw) }
-
-func parse(raw []byte) (*Config, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return nil, fmt.Errorf("YAML invalide : %w", err)
+// Parse builds a configuration from a single document (includes are not resolved).
+func Parse(raw []byte) (*Config, error) {
+	c, problems, err := decodeMain(raw, "")
+	if err != nil {
+		return nil, err
 	}
-	problems := unknownFields(raw)
-	var files []string
-	expandNode(&root, &problems, &files)
+	return finish(c, problems)
+}
 
+func finish(c *Config, problems []string) (*Config, error) {
+	applyDefaults(c)
+	problems = append(problems, validate(c)...)
+	if len(problems) > 0 {
+		return c, &ValidationError{Problems: problems}
+	}
+	return c, nil
+}
+
+// decodeMain parses and expands the main document.
+func decodeMain(raw []byte, origin string) (*Config, []string, error) {
 	var c Config
-	if err := root.Decode(&c); err != nil {
-		return nil, fmt.Errorf("structure de configuration invalide : %w", err)
+	problems, files, err := decodeDoc(raw, origin, &c)
+	if err != nil {
+		return nil, nil, err
 	}
 	c.Files = files
-	applyDefaults(&c)
-	problems = append(problems, validate(&c)...)
-	if len(problems) > 0 {
-		return &c, &ValidationError{Problems: problems}
+	return &c, problems, nil
+}
+
+// fragment is what an included file may declare: the APIs and groups of a team.
+// Notifiers, network profiles and server settings stay in the main file.
+type fragment struct {
+	Groups []Group `yaml:"groups"`
+	APIs   []API   `yaml:"apis"`
+}
+
+func (c *Config) addFragment(name string, raw []byte) []string {
+	var f fragment
+	problems, files, err := decodeDoc(raw, name, &f)
+	if err != nil {
+		return append(problems, err.Error())
 	}
-	return &c, nil
+	c.Files = append(c.Files, files...)
+	for i := range f.Groups {
+		f.Groups[i].File = name
+	}
+	for i := range f.APIs {
+		f.APIs[i].File = name
+	}
+	c.Groups = append(c.Groups, f.Groups...)
+	c.APIs = append(c.APIs, f.APIs...)
+	return problems
+}
+
+// fragmentFiles resolves the include patterns (relative to the main file).
+func (c *Config) fragmentFiles() ([]string, error) {
+	var out []string
+	for _, pattern := range c.Include {
+		if !filepath.IsAbs(pattern) {
+			pattern = filepath.Join(c.baseDir, pattern)
+		}
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return out, fmt.Errorf("include %q : motif invalide : %v", pattern, err)
+		}
+		sort.Strings(matches)
+		for _, m := range matches {
+			if !slices.Contains(out, m) {
+				out = append(out, m)
+			}
+		}
+	}
+	return out, nil
+}
+
+// Fingerprint changes whenever the main file, an included fragment (added,
+// removed or edited) or a referenced secret file changes.
+func (c *Config) Fingerprint() string {
+	h := sha256.New()
+	files := append([]string{}, c.Files...)
+	if frags, err := c.fragmentFiles(); err == nil {
+		files = append(files, frags...)
+	}
+	sort.Strings(files)
+	for _, f := range slices.Compact(files) {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Fprintf(h, "%s:missing;", f)
+			continue
+		}
+		fmt.Fprintf(h, "%s:%x;", f, sha256.Sum256(b))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// decodeDoc parses one YAML document into out: unknown keys, ${...} expansion
+// (after parsing, so secrets cannot break the YAML) and decoding. Problems are
+// prefixed with origin when set.
+func decodeDoc(raw []byte, origin string, out any) (problems, files []string, err error) {
+	prefix := ""
+	if origin != "" {
+		prefix = origin + " : "
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, nil, fmt.Errorf("%sYAML invalide : %w", prefix, err)
+	}
+	var p []string
+	for _, msg := range unknownFields(raw, out) {
+		p = append(p, prefix+msg)
+	}
+	var exp []string
+	expandNode(&root, &exp, &files)
+	for _, msg := range exp {
+		p = append(p, prefix+msg)
+	}
+	if len(root.Content) == 0 {
+		return p, files, nil // empty document
+	}
+	if err := root.Decode(out); err != nil {
+		return p, files, fmt.Errorf("%sstructure invalide : %w", prefix, err)
+	}
+	return p, files, nil
 }
 
 func firstDuration(v ...any) *Duration {
@@ -402,12 +575,12 @@ func (c *Config) Group(id string) (*Group, bool) {
 }
 
 // unknownFields reports misspelled or unsupported keys, which yaml would otherwise silently ignore.
-func unknownFields(raw []byte) []string {
+func unknownFields(raw []byte, shape any) []string {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
-	var c Config
+	target := reflect.New(reflect.TypeOf(shape).Elem()).Interface() // fresh value of the same type
 	var te *yaml.TypeError
-	if err := dec.Decode(&c); errors.As(err, &te) {
+	if err := dec.Decode(target); errors.As(err, &te) {
 		var p []string
 		for _, msg := range te.Errors {
 			if strings.Contains(msg, "not found in type") {

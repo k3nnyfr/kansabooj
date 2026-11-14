@@ -4,10 +4,7 @@ package scheduler
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/url"
@@ -50,7 +47,7 @@ type Scheduler struct {
 }
 
 const (
-	leaderLock     = "kansabooj:scheduler"
+	leaderLock     = "scheduler"
 	leaderRetry    = 15 * time.Second
 	leaderHeartbit = 10 * time.Second
 )
@@ -67,6 +64,9 @@ func New(path string, cfg *config.Config, st *store.Store, log *slog.Logger) (*S
 	s.disp = d
 	return s, nil
 }
+
+// ConfigPath returns the path of the main configuration file.
+func (s *Scheduler) ConfigPath() string { return s.path }
 
 // Config returns the live configuration.
 func (s *Scheduler) Config() *config.Config {
@@ -227,7 +227,7 @@ func (s *Scheduler) run(ctx context.Context, apiID, trigger string) (*monitor.Ou
 	defer hl.Unlock()
 
 	// Across replicas: never two checks of the same API at once.
-	lock, ok, err := s.store.TryLock(ctx, "kansabooj:api:"+apiID)
+	lock, ok, err := s.store.TryLock(ctx, "api:"+apiID)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +300,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 // file changes (Kubernetes updates mounted ConfigMaps/Secrets in place). Polling is
 // used on purpose: it survives the symlink swaps done by the kubelet.
 func (s *Scheduler) WatchConfig(ctx context.Context, every time.Duration) {
-	last := fingerprint(s.Config().Files)
+	last := s.Config().Fingerprint()
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -309,7 +309,7 @@ func (s *Scheduler) WatchConfig(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 		}
-		fp := fingerprint(s.Config().Files)
+		fp := s.Config().Fingerprint()
 		if fp == last {
 			continue
 		}
@@ -319,19 +319,6 @@ func (s *Scheduler) WatchConfig(ctx context.Context, every time.Duration) {
 		}
 		last = fp // do not retry an invalid config every tick; the next edit triggers a new attempt
 	}
-}
-
-func fingerprint(files []string) string {
-	h := sha256.New()
-	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			fmt.Fprintf(h, "%s:missing;", f)
-			continue
-		}
-		fmt.Fprintf(h, "%s:%x;", f, sha256.Sum256(b))
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Status describes the scheduler for the status page.

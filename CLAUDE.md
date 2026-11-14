@@ -23,7 +23,7 @@ Roadmap : `docs/ROADMAP.md`. Décisions d'architecture : `docs/adr/`.
 
 ```
 backend/
-  cmd/kansabooj/        CLI : validate | check | history | serve
+  cmd/kansabooj/        CLI : validate | check | history | serve | migrate | diff | token
   internal/config/      chargement + validation de apis.yml, résolution ${ENV}, fusion defaults
   internal/discover/    URL de doc (swagger-ui, redoc, html) → URL de spec
   internal/fetch/       client HTTP : proxy, CA, auth, ETag, deny_cidrs, timeouts
@@ -35,13 +35,16 @@ backend/
   internal/scheduler/   boucle de checks (interval + jitter, 1 fetch concurrent par domaine), reload de config
   internal/notify/      décide/rend/envoie : slack | googlechat | teams | generic (HMAC), idempotent, retry/backoff
   internal/i18n/        catalogue FR/EN côté serveur (notifications)
-  internal/httpapi/     API REST /api/* + front embarqué (web/dist, sinon web/placeholder.html) + /healthz
+  internal/httpapi/     API REST /api/* (table routes() avec scope par route), auth (jetons/SSO), validation de config,
+                        openapi.yaml embarqué, front embarqué (web/dist, sinon web/placeholder.html), /healthz /readyz
+  internal/token/       jetons d'API (kbj_…), seul le hash sha256 est configuré
 frontend/src/
   pages/                ApiList, ApiDetail (timeline + détail des changements), StatusPage
   components/           badges, bouton de check, encart d'erreur
   api/client.ts         client typé de l'API REST — à garder aligné avec internal/httpapi et internal/store
   i18n.tsx              catalogue FR/EN du front + formatage des dates (Intl)
 config/apis.schema.json JSON Schema de la config (autocomplétion IDE) — à tenir à jour avec internal/config
+config/apis.fragment.schema.json  schéma des fragments d'équipe (apis.d/*.yml : groups + apis uniquement)
 config/apis.example.yml exemple exhaustif (toutes les options, secrets fictifs : ne s'exécute pas tel quel)
 config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Taskfile
 deploy/kubernetes/      base + overlays kubernetes (Ingress) / openshift (Route), exemple CloudNativePG
@@ -65,7 +68,8 @@ task test:pg PG=postgres://…         # même suite sur PostgreSQL (base tempor
 task lint                            # gofmt, go vet, tsc
 task build                           # front embarqué + binaire bin/kansabooj (version = git describe)
 task image                           # image de conteneur (podman ou docker)
-task deploy:render TARGET=openshift  # manifests kustomize générés
+task deploy:render TARGET=openshift  # manifests kustomize générés (aussi : openshift-external-db)
+task migrate                         # migrations seules (compte DDL ; cf. database.migrate: false)
 ```
 
 Les tests n'appellent jamais le réseau (httptest). Rechargement de config à chaud : `kill -HUP` ou `POST /api/admin/reload`.
@@ -93,6 +97,10 @@ Les tests n'appellent jamais le réseau (httptest). Rechargement de config à ch
     `LastInsertId`), `lower()` plutôt que `COLLATE NOCASE`. Toute modification du store passe `task test` **et** `task test:pg`.
 12. **Sans état en `serve`** : aucune écriture disque (racine en lecture seule en production). Le scheduler ne tourne
     que sur le leader ; tout ce qui est planifié doit vivre dans `Scheduler.lead`.
+14. **Toute route HTTP est déclarée dans `Server.routes()` avec son scope** et décrite dans `httpapi/openapi.yaml`
+    (le test `TestOpenAPICoversRoutes` échoue sinon). Aucune route ne modifie la configuration : elle reste as-code (ADR 0003).
+15. Les fragments (`include:`) ne déclarent que `groups` et `apis` ; notifiers, profils réseau, base et serveur restent
+    dans le fichier principal. Les messages de validation citent le fichier d'origine.
 13. Héritage de configuration : **API > groupe > defaults** (`applyDefaults`). Les profils réseau ne doivent jamais
     affaiblir le profil `default` ; l'accès au réseau interne est toujours un opt-in explicite (`network:`).
 9. **Agnostique de la Gateway** : aucun connecteur spécifique à une plateforme (Kong, Apigee…). Le seul pont prévu est

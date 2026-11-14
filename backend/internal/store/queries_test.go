@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,4 +92,22 @@ func TestQueries(t *testing.T) {
 	if m, _ := st.NextChecks(ctx); m["a"].Unix() != next.Unix() {
 		t.Errorf("next checks = %v", m)
 	}
+}
+
+func TestMigrateFalseRequiresMigratedSchema(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "x.db")
+	if _, err := store.OpenWith(ctx, store.Options{DSN: dsn, Migrate: false}); err == nil || !strings.Contains(err.Error(), "kansabooj migrate") {
+		t.Fatalf("expected an actionable error, got %v", err)
+	}
+	st, err := store.OpenWith(ctx, store.Options{DSN: dsn, Migrate: true})
+	if err != nil || len(st.Applied()) == 0 {
+		t.Fatalf("migrate: %v %v", st, err)
+	}
+	st.Close()
+	st, err = store.OpenWith(ctx, store.Options{DSN: dsn, Migrate: false})
+	if err != nil {
+		t.Fatalf("migrated schema should open without migrating: %v", err)
+	}
+	st.Close()
 }

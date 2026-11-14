@@ -30,6 +30,7 @@ var web embed.FS
 // Runtime is what the API needs from the scheduler.
 type Runtime interface {
 	Config() *config.Config
+	ConfigPath() string
 	TriggerCheck(ctx context.Context, apiID string) (*monitor.Outcome, error)
 	Reload(ctx context.Context) error
 	Status() scheduler.Status
@@ -45,21 +46,41 @@ func New(rt Runtime, st *store.Store, log *slog.Logger) *Server {
 	return &Server{rt: rt, store: st, log: log}
 }
 
+// route is an API endpoint; scope "" means public (probes, API description).
+type route struct {
+	method, path, scope string
+	handler             http.HandlerFunc
+}
+
+func (s *Server) routes() []route {
+	return []route{
+		{"GET", "/healthz", "", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }}, // liveness
+		{"GET", "/readyz", "", s.ready}, // readiness
+		{"GET", "/api/openapi.yaml", "", s.openapi},
+		{"GET", "/api/meta", "read", s.meta},
+		{"GET", "/api/status", "read", s.status},
+		{"GET", "/api/apis", "read", s.listAPIs},
+		{"GET", "/api/apis/{id}", "read", s.getAPI},
+		{"GET", "/api/apis/{id}/timeline", "read", s.timeline},
+		{"POST", "/api/apis/{id}/check", "check", s.check},
+		{"POST", "/api/apis/{id}/ack", "ack", s.ackAll},
+		{"GET", "/api/changes/{id}", "read", s.getChange},
+		{"POST", "/api/changes/{id}/ack", "ack", s.ack},
+		{"GET", "/api/snapshots/{id}/spec", "read", s.spec},
+		{"POST", "/api/config/validate", "validate", s.validateConfig},
+		{"POST", "/api/admin/reload", "admin", s.reload},
+	}
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }) // liveness
-	mux.HandleFunc("GET /readyz", s.ready)                                                                 // readiness
-	mux.HandleFunc("GET /api/meta", s.meta)
-	mux.HandleFunc("GET /api/status", s.status)
-	mux.HandleFunc("GET /api/apis", s.listAPIs)
-	mux.HandleFunc("GET /api/apis/{id}", s.getAPI)
-	mux.HandleFunc("GET /api/apis/{id}/timeline", s.timeline)
-	mux.HandleFunc("POST /api/apis/{id}/check", s.check)
-	mux.HandleFunc("POST /api/apis/{id}/ack", s.ackAll)
-	mux.HandleFunc("GET /api/changes/{id}", s.getChange)
-	mux.HandleFunc("POST /api/changes/{id}/ack", s.ack)
-	mux.HandleFunc("GET /api/snapshots/{id}/spec", s.spec)
-	mux.HandleFunc("POST /api/admin/reload", s.reload)
+	for _, rt := range s.routes() {
+		h := rt.handler
+		if rt.scope != "" {
+			h = s.authorize(rt.scope, h)
+		}
+		mux.HandleFunc(rt.method+" "+rt.path, h)
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "route inconnue") })
 	mux.Handle("/", spa())
 	return s.logged(mux)
@@ -271,8 +292,8 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) user(r *http.Request) string {
-	if u := strings.TrimSpace(r.Header.Get(s.rt.Config().Server.UserHeader)); u != "" {
-		return u
+	if id, ok := r.Context().Value(identityKey{}).(*identity); ok {
+		return id.name
 	}
 	return "anonymous"
 }

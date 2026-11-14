@@ -3,11 +3,35 @@
 # Source de vérité versionnée (GitOps). La base ne contient que l'état et l'historique.
 # Les valeurs ${VAR} sont résolues depuis l'environnement au chargement. Jamais de secret en clair ici.
 
+# Fichiers d'équipe (groups + apis), un par équipe, chacun protégé par CODEOWNERS dans le dépôt de config.
+include: [apis.d/*.yml]
+
 server:
   base_url: https://kansabooj.interne.example   # liens dans les notifications
   language: fr              # fr | en : langue par défaut (interface et notifications)
   user_header: X-Forwarded-User
   concurrency: 4
+  require_identity: true    # refuse les appels sans identité SSO ni jeton
+  admins: [alice.martin]    # utilisateurs SSO autorisés à recharger la configuration
+  tokens:                   # jetons d'API : kansabooj token new <nom> --scopes …
+    - name: ci-depot-config
+      hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+      scopes: [read, validate]
+
+# Base PostgreSQL sur un serveur tiers (sinon : KANSABOOJ_DB, ou SQLite local par défaut).
+# Voir docs/guides/postgresql-externe.md
+database:
+  host: pg-prod.dba.interne.example
+  port: 5432
+  name: apis_shared
+  user: kansabooj_app
+  password: ${KANSABOOJ_DB_PASSWORD}
+  sslmode: verify-full
+  sslrootcert: /etc/kansabooj-db/ca.pem
+  schema: kansabooj                  # schéma dédié sur une base partagée
+  migrate: false                     # DDL par le compte propriétaire (kansabooj migrate)
+  max_open_conns: 10
+  conn_max_lifetime: 30m
 
 defaults:
   interval: 6h            # fréquence de check (Go duration)

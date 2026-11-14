@@ -17,9 +17,10 @@ func (e *ValidationError) Error() string {
 }
 
 var (
-	idPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	tagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]{0,49}$`)
-	opPattern  = regexp.MustCompile(`^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\S*$`)
+	idPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	hashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	tagPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]{0,49}$`)
+	opPattern   = regexp.MustCompile(`^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\S*$`)
 
 	sourceTypes   = []string{SourceOpenAPI, SourceSwaggerUI, SourceRedoc, SourceHTML, SourceAuto}
 	notifierTypes = []string{"googlechat", "slack", "teams", "generic"}
@@ -30,11 +31,31 @@ func validate(c *Config) []string {
 	var p []string
 	add := func(format string, args ...any) { p = append(p, fmt.Sprintf(format, args...)) }
 
+	p = append(p, c.Database.validate()...)
 	if !slices.Contains(Languages, c.Server.Language) {
 		add("server.language : langue %q non supportée (fr, en)", c.Server.Language)
 	}
 	if c.Server.BaseURL != "" && !isHTTPURL(c.Server.BaseURL) {
 		add("server.base_url : URL invalide %q", c.Server.BaseURL)
+	}
+	tokNames := map[string]bool{}
+	for i, tk := range c.Server.Tokens {
+		where := fmt.Sprintf("server.tokens[%d] (%s)", i, tk.Name)
+		if tk.Name == "" || tokNames[tk.Name] {
+			add("%s : name absent ou en double", where)
+		}
+		tokNames[tk.Name] = true
+		if !hashPattern.MatchString(tk.Hash) {
+			add("%s : hash attendu au format sha256:<64 hexa> (générer avec « kansabooj token new »)", where)
+		}
+		if len(tk.Scopes) == 0 {
+			add("%s : au moins un scope (%s)", where, strings.Join(Scopes, ", "))
+		}
+		for _, sc := range tk.Scopes {
+			if !slices.Contains(Scopes, sc) {
+				add("%s : scope %q inconnu (%s)", where, sc, strings.Join(Scopes, ", "))
+			}
+		}
 	}
 	if c.Server.Concurrency < 1 {
 		add("server.concurrency : doit être ≥ 1")
@@ -96,6 +117,9 @@ func validate(c *Config) []string {
 	groups := map[string]bool{}
 	for i, g := range c.Groups {
 		where := fmt.Sprintf("groups[%d] (%s)", i, g.ID)
+		if g.File != "" {
+			where = fmt.Sprintf("%s : groupe %s", g.File, g.ID)
+		}
 		switch {
 		case !idPattern.MatchString(g.ID):
 			add("groups[%d] : id absent ou invalide (minuscules, chiffres et tirets)", i)
@@ -145,18 +169,23 @@ func validate(c *Config) []string {
 	if len(c.APIs) == 0 {
 		add("apis : aucune API déclarée")
 	}
-	ids := map[string]bool{}
+	ids := map[string]string{} // id → where it was first declared
 	for i, a := range c.APIs {
 		where := fmt.Sprintf("apis[%d] (%s)", i, a.ID)
+		if a.File != "" {
+			where = fmt.Sprintf("%s : api %s", a.File, a.ID)
+		}
 		switch {
 		case a.ID == "":
 			add("apis[%d] : champ id obligatoire", i)
 		case !idPattern.MatchString(a.ID):
 			add("%s : id invalide (minuscules, chiffres et tirets uniquement)", where)
-		case ids[a.ID]:
-			add("%s : id en double", where)
+		case ids[a.ID] != "":
+			add("%s : id en double (déjà déclaré : %s)", where, ids[a.ID])
 		}
-		ids[a.ID] = true
+		if ids[a.ID] == "" {
+			ids[a.ID] = where
+		}
 		if a.Name == "" {
 			add("%s : champ name obligatoire", where)
 		}

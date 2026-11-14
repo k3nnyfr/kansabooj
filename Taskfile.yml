@@ -3,7 +3,9 @@ version: '3'
 
 vars:
   CONFIG: '{{.CONFIG | default "config/apis.demo.yml"}}'
-  DB: '{{.DB | default "data/kansabooj.db"}}'
+  # DB vide : section database de la config, sinon data/kansabooj.db
+  DB: '{{.DB | default ""}}'
+  DBFLAG: '{{if .DB}}--db {{.DB}}{{end}}'
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo dev
   BIN: bin/kansabooj
@@ -15,27 +17,33 @@ tasks:
 
   validate:
     desc: "Valide la configuration (CONFIG=... pour en choisir une autre)"
-    dir: backend
+    deps: [build:cli]
     cmds:
-      - go run ./cmd/kansabooj validate --config ../{{.CONFIG}}
+      - ./{{.BIN}} validate --config {{.CONFIG}} {{.CLI_ARGS}}
 
   check:
     desc: "Lance un check — ex : task check -- worldline-direct | task check -- --all | task check -- --dry-run mon-api"
-    dir: backend
+    deps: [build:cli]
     cmds:
-      - go run ./cmd/kansabooj check --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+      - ./{{.BIN}} check --config {{.CONFIG}} {{.DBFLAG}} {{.CLI_ARGS}}
 
   history:
     desc: "Timeline d'une API en CLI — ex : task history -- worldline-direct"
-    dir: backend
+    deps: [build:cli]
     cmds:
-      - go run ./cmd/kansabooj history --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+      - ./{{.BIN}} history --config {{.CONFIG}} {{.DBFLAG}} {{.CLI_ARGS}}
+
+  migrate:
+    desc: "Applique les migrations de schéma (compte DDL) — ex : KANSABOOJ_DB=postgres://owner@… task migrate"
+    deps: [build:cli]
+    cmds:
+      - ./{{.BIN}} migrate --config {{.CONFIG}} {{.DBFLAG}} {{.CLI_ARGS}}
 
   serve:
     desc: "Serveur (API + scheduler) en développement, port 8080 — à combiner avec task ui:dev"
-    dir: backend
+    deps: [build:cli]
     cmds:
-      - go run ./cmd/kansabooj serve --config ../{{.CONFIG}} --db ../{{.DB}} {{.CLI_ARGS}}
+      - ./{{.BIN}} serve --config {{.CONFIG}} {{.DBFLAG}} {{.CLI_ARGS}}
 
   ui:install:
     desc: Installe les dépendances du front
@@ -68,6 +76,8 @@ tasks:
   build:cli:
     desc: Binaire sans reconstruire le front
     dir: backend
+    sources: ['**/*.go', '**/*.sql', '**/*.yaml', go.mod, go.sum, 'internal/httpapi/web/**/*']
+    generates: ['../{{.BIN}}']
     env: { CGO_ENABLED: '0' }
     cmds:
       - go build -trimpath -ldflags "-s -w -X git.k3nny.fr/kansabooj/internal/httpapi.Version={{.VERSION}}" -o ../{{.BIN}} ./cmd/kansabooj

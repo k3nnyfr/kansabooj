@@ -1,0 +1,7 @@
+# OpenShift + PostgreSQL sur un serveur tiers (exemple d'assemblage)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift
+components:
+  - ../../components/external-db

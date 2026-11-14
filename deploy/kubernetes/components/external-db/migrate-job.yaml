@@ -1,0 +1,39 @@
+# Migration du schéma par le compte propriétaire, quand le compte applicatif n'a pas les droits DDL
+# (database.migrate: false). À appliquer avant le déploiement d'une nouvelle version :
+#   kubectl apply -f migrate-job.yaml && kubectl wait --for=condition=complete job/kansabooj-migrate
+# Le schéma, le TLS et le pool viennent de la section database de apis.yml ; seule l'identité change.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kansabooj-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: kansabooj-migrate }
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: migrate
+          image: registry.example/kansabooj:latest
+          args: [migrate]
+          env:
+            - name: KANSABOOJ_DB                 # URL du compte propriétaire (DDL)
+              valueFrom: { secretKeyRef: { name: kansabooj-db-owner, key: uri } }
+            - name: KANSABOOJ_DB_PASSWORD        # requis par la validation de apis.yml
+              valueFrom: { secretKeyRef: { name: kansabooj-db-credentials, key: password } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/kansabooj, readOnly: true }
+            - { name: db-ca, mountPath: /etc/kansabooj-db, readOnly: true }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: config
+          configMap: { name: kansabooj-config }
+        - name: db-ca
+          secret: { secretName: kansabooj-db-ca, optional: true }

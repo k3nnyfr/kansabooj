@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kansabooj.local/apis.fragment.schema.json",
+  "title": "Kansabooj — fragment de configuration (fichier d'équipe)",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
+      "description": "Durée Go : 30s, 10m, 6h, 1h30m"
+    },
+    "ignore": {
+      "type": "array",
+      "description": "Chemins retirés avant comparaison (anti-bruit). Sous-ensemble JSONPath : $.a.b, * = n'importe quelle clé.",
+      "items": {
+        "type": "string",
+        "pattern": "^\\$\\.[^.]+(\\.[^.]+)*$"
+      },
+      "examples": [
+        [
+          "$.servers",
+          "$.info.x-generated-at",
+          "$.paths.*.x-internal"
+        ]
+      ]
+    },
+    "level": {
+      "enum": [
+        "error",
+        "warn",
+        "info"
+      ]
+    },
+    "auth": {
+      "type": "object",
+      "description": "Authentification pour lire la documentation. Les credentials ne sont envoyés qu'à l'origine de source.url.",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "header",
+            "query",
+            "basic",
+            "bearer",
+            "oauth2_client_credentials",
+            "mtls"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "header / query : nom de l'en-tête ou du paramètre"
+        },
+        "value": {
+          "type": "string",
+          "description": "header / query : valeur (utiliser ${ENV_VAR})"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string",
+          "description": "bearer : token statique"
+        },
+        "token_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "type": "string"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "paramètres additionnels de la requête de token (ex : audience)"
+        },
+        "cert_file": {
+          "type": "string"
+        },
+        "key_file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "header",
+                  "query"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name",
+              "value"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "basic"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "username",
+              "password"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "bearer"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "token"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "oauth2_client_credentials"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "token_url",
+              "client_id",
+              "client_secret"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "mtls"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "cert_file",
+              "key_file"
+            ]
+          }
+        }
+      ]
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,49}$",
+      "description": "minuscules, chiffres, - _ . :"
+    },
+    "cidrs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "network": {
+      "type": "string",
+      "description": "profil réseau (http.profiles) ; défaut : default"
+    }
+  },
+  "properties": {
+    "groups": {
+      "type": "array",
+      "description": "groupes d'APIs portant des valeurs par défaut héritées (API > groupe > defaults)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/tag"
+            }
+          },
+          "interval": {
+            "$ref": "#/$defs/duration"
+          },
+          "timeout": {
+            "$ref": "#/$defs/duration"
+          },
+          "notify": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ignore": {
+            "$ref": "#/$defs/ignore"
+          },
+          "auth": {
+            "$ref": "#/$defs/auth"
+          },
+          "network": {
+            "$ref": "#/$defs/network"
+          }
+        }
+      }
+    },
+    "apis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "clé stable de l'historique : ne jamais renommer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "équipe propriétaire"
+          },
+          "group": {
+            "type": "string",
+            "description": "id d'un groupe déclaré dans groups"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/tag"
+            }
+          },
+          "network": {
+            "$ref": "#/$defs/network"
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https?://"
+              },
+              "type": {
+                "enum": [
+                  "openapi",
+                  "swagger-ui",
+                  "redoc",
+                  "html",
+                  "auto"
+                ],
+                "default": "auto"
+              }
+            }
+          },
+          "auth": {
+            "$ref": "#/$defs/auth"
+          },
+          "interval": {
+            "$ref": "#/$defs/duration"
+          },
+          "timeout": {
+            "$ref": "#/$defs/duration"
+          },
+          "notify": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ignore": {
+            "$ref": "#/$defs/ignore"
+          },
+          "gateway": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "exposed_operations": {
+                "type": "array",
+                "description": "opérations réexposées dans la Gateway ; * final = préfixe ; noms de paramètres ignorés",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\\S*$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

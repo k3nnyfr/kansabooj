@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -118,6 +119,15 @@ func TestOrigin(t *testing.T) {
 	}
 }
 
+func TestPublicJSONRoundTrip(t *testing.T) {
+	c, _ := Parse([]byte(base))
+	a, _ := c.API("petstore")
+	var back API
+	if err := json.Unmarshal([]byte(a.PublicJSON()), &back); err != nil || back.Interval.String() != "2h" || back.Ignore[0] != "$.servers" {
+		t.Errorf("round trip: %+v %v", back, err)
+	}
+}
+
 func TestDurationString(t *testing.T) {
 	for d, want := range map[time.Duration]string{6 * time.Hour: "6h", 90 * time.Minute: "1h30m", 45 * time.Second: "45s", 10 * time.Minute: "10m", 0: "0s"} {
 		if got := Duration(d).String(); got != want {
@@ -209,5 +219,90 @@ apis:
 	}
 	if strings.Count(msg, "username obligatoire") != 1 {
 		t.Errorf("inherited auth problem should be reported once:\n%s", msg)
+	}
+}
+
+func TestDatabaseSection(t *testing.T) {
+	t.Setenv("DBPW", "p@ss:w/rd")
+	c, err := Parse([]byte(`
+database:
+  host: pg.dba.example
+  name: shared
+  user: kansabooj_app
+  password: ${DBPW}
+  sslrootcert: /etc/kansabooj-db/ca.pem
+  schema: kansabooj
+  migrate: false
+apis: [ { id: a, name: A, source: { url: "https://a.example" } } ]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := c.Database
+	if d.SSLMode != "verify-full" || d.Port != 5432 || d.AutoMigrate() || d.MaxOpenConns != 10 {
+		t.Errorf("defaults: %+v", d)
+	}
+	dsn := d.DSN()
+	for _, want := range []string{"postgres://kansabooj_app:p%40ss%3Aw%2Frd@pg.dba.example:5432/shared?", "sslmode=verify-full", "sslrootcert=%2Fetc%2Fkansabooj-db%2Fca.pem", "connect_timeout=10"} {
+		if !strings.Contains(dsn, want) {
+			t.Errorf("DSN %q lacks %q", dsn, want)
+		}
+	}
+	if strings.Contains(d.Redacted(), "p@ss") {
+		t.Errorf("password leaked: %s", d.Redacted())
+	}
+
+	_, err = Parse([]byte(`
+database: { url: "mysql://x", host: h, sslmode: maybe, schema: "Bad-Schema", sslcert: /c, max_open_conns: 2, max_idle_conns: 5 }
+apis: [ { id: a, name: A, source: { url: "https://a.example" } } ]
+`))
+	for _, want := range []string{"exclusifs", "postgres://", "name obligatoire", "user obligatoire", "sslmode", "schema", "sslcert et sslkey", "max_idle_conns", "≥ 4"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+}
+
+func TestIncludeFragments(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "apis.d"), 0o755)
+	write := func(name, body string) { os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600) }
+	write("apis.yml", `
+include: [apis.d/*.yml]
+notifiers: [ { name: team, type: slack, url: "https://h.example" } ]
+apis: [ { id: core, name: Core, source: { url: "https://core.example" } } ]
+`)
+	write("apis.d/paiement.yml", `
+groups: [ { id: paiement, name: Paiement, notify: [team] } ]
+apis: [ { id: psp, name: PSP, group: paiement, source: { url: "https://psp.example" } } ]
+`)
+	write("apis.d/crm.yml", `apis: [ { id: crm, name: CRM, source: { url: "https://crm.example" } } ]`)
+
+	c, err := Load(filepath.Join(dir, "apis.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.APIs) != 3 || len(c.Groups) != 1 {
+		t.Fatalf("apis=%d groups=%d", len(c.APIs), len(c.Groups))
+	}
+	if a, _ := c.API("psp"); a.File != "paiement.yml" || a.Notify[0] != "team" {
+		t.Errorf("fragment api = %+v", a)
+	}
+
+	fp := c.Fingerprint()
+	write("apis.d/new.yml", `apis: []`)
+	if c.Fingerprint() == fp {
+		t.Error("a new fragment must change the fingerprint")
+	}
+
+	// a proposed change of a team's fragment, validated against the live configuration
+	_, err = LoadWith(filepath.Join(dir, "apis.yml"), map[string][]byte{
+		"crm.yml": []byte(`apis: [ { id: psp, name: dup, group: ghost, notify: [nope], source: { url: "https://x.example" } } ]
+notifiers: []`),
+	})
+	for _, want := range []string{"crm.yml : clé inconnue", "id en double (déjà déclaré : crm.yml : api psp)", "groupe \"ghost\"", "notifier \"nope\""} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
 	}
 }

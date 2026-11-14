@@ -1,6 +1,6 @@
 # ADR 0003 — Mode API et gestion « as-code »
 
-**Statut** : proposé — 2026-11-14
+**Statut** : accepté et implémenté (v0.4) — 2026-11-14
 
 ## Contexte
 On veut piloter Kansabooj sans passer par l'interface : déclarer des APIs depuis la CI d'une équipe productrice
@@ -19,9 +19,15 @@ On fait (1) à fond et on n'ouvre pas (2) tant qu'un besoin concret ne l'impose 
   donc se surveiller lui-même. Les actions utiles à l'automatisation existent : check, acquittement, reload.
 - **Validation en CI** : `POST /api/config/validate` (et `kansabooj validate` hors ligne) pour valider une MR de config
   *avec le contexte du serveur* (variables d'environnement présentes, notifiers existants) avant merge.
-- **Producteurs internes** : leur CI appelle `kansabooj check --dry-run` sur la spec du build pour détecter une rupture
-  de contrat **avant** déploiement — sans rien écrire côté serveur.
-- **Authentification des appels machine** : jetons d'API à portée limitée (`read`, `check`, `ack`, `admin`), stockés hachés.
+- **Producteurs internes** : leur CI appelle `kansabooj diff kansabooj:<api-id> build/openapi.yaml` pour comparer la spec
+  du build à la version enregistrée (périmètre et règles anti-bruit de l'API appliqués) et bloquer une rupture de contrat
+  **avant** déploiement — sans rien écrire côté serveur.
+- **Authentification des appels machine** : jetons d'API à portée limitée (`read`, `check`, `ack`, `validate`, `admin`),
+  déclarés **dans la configuration sous forme de hash** (`server.tokens`, générés par `kansabooj token new`) : ils
+  restent eux aussi « as-code » et révisables, le jeton lui-même n'étant connu que de l'appelant.
+
+Implémentation : `include:` (fragments), `GET /api/openapi.yaml` (test garantissant que chaque route est décrite),
+`POST /api/config/validate?fragment=…`, `server.tokens` / `require_identity` / `admins`, `kansabooj diff`, guide `docs/guides/ci.md`.
 
 ## Option écartée (pour l'instant) : CRUD des APIs par l'API
 - Crée une **seconde source de vérité** (YAML vs base) avec des conflits à arbitrer.

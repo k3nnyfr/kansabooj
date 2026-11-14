@@ -1,0 +1,28 @@
+# Base PostgreSQL sur un serveur tiers (équipe DBA, base managée…), décrite dans la section
+# `database:` de apis.yml. Usage, dans un overlay :
+#   components: [../../components/external-db]
+# Prérequis :
+#   - Secret kansabooj-db-credentials : clé « password » (compte applicatif)
+#   - Secret kansabooj-db-ca (optionnel) : clé « ca.pem » (CA du certificat serveur, sslmode verify-full)
+#   - si database.migrate: false, exécuter migrate-job.yaml avec le compte propriétaire avant chaque montée de version
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: { kind: Deployment, name: kansabooj }
+    patch: |-
+      # retire KANSABOOJ_DB (URL du Secret CloudNativePG) : la section database de apis.yml s'applique
+      - op: remove
+        path: /spec/template/spec/containers/0/env/0
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: KANSABOOJ_DB_PASSWORD          # référencé par database.password: ${KANSABOOJ_DB_PASSWORD}
+          valueFrom: { secretKeyRef: { name: kansabooj-db-credentials, key: password } }
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value: { name: db-ca, mountPath: /etc/kansabooj-db, readOnly: true }
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: db-ca                          # database.sslrootcert: /etc/kansabooj-db/ca.pem
+          secret: { secretName: kansabooj-db-ca, optional: true }
