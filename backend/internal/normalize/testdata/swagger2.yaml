@@ -1,0 +1,36 @@
+swagger: "2.0"
+info:
+  title: Legacy Orders
+  version: "2.3"
+host: api.partner.example
+basePath: /v2
+schemes: [https]
+paths:
+  /orders:
+    get:
+      parameters:
+        - name: status
+          in: query
+          type: string
+      responses:
+        200:
+          description: ok
+          schema:
+            type: array
+            items: { $ref: "#/definitions/Order" }
+  /orders/{id}:
+    get:
+      parameters:
+        - { name: id, in: path, required: true, type: string }
+      responses:
+        200:
+          description: ok
+          schema: { $ref: "#/definitions/Order" }
+definitions:
+  Order:
+    type: object
+    required: [id]
+    properties:
+      id: { type: string }
+      amount: { type: number }
+      createdAt: { type: string, format: date-time, example: 2024-01-01 }

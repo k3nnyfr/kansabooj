@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=./apis.schema.json
+# Kansabooj — configuration des APIs surveillées
+# Source de vérité versionnée (GitOps). La base ne contient que l'état et l'historique.
+# Les valeurs ${VAR} sont résolues depuis l'environnement au chargement. Jamais de secret en clair ici.
+
+defaults:
+  interval: 6h            # fréquence de check (Go duration)
+  jitter: 10m             # décalage aléatoire pour ne pas tout lancer à la même seconde
+  timeout: 30s
+  error_threshold: 3      # nb d'échecs consécutifs avant statut "stale" + notification
+  notify: [api-team-gchat]
+  ignore:                 # chemins JSONPath exclus de la normalisation (anti-bruit)
+    - $.servers
+    - $.info.x-generated-at
+
+http:
+  proxy: ${HTTPS_PROXY:-}           # vide = variables d'environnement standard
+  ca_bundle: /etc/ssl/certs/corp-ca.pem
+  user_agent: "kansabooj/1.0 (+contact: equipe-api-gateway)"
+  deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
+
+notifiers:
+  - name: api-team-gchat
+    type: googlechat        # googlechat | slack | teams | generic
+    url: ${GCHAT_WEBHOOK_API_TEAM}
+    min_level: warn         # error (breaking) | warn | info
+    only_in_scope: true     # n'envoie que les changements touchant des opérations réexposées
+  - name: integration-slack
+    type: slack
+    url: ${SLACK_WEBHOOK_INTEGRATION}
+    min_level: error
+  - name: catalogue-hook
+    type: generic           # POST JSON brut, signé HMAC-SHA256 dans X-Kansabooj-Signature
+    url: https://catalogue.interne.example/hooks/api-changes
+    secret: ${CATALOGUE_HOOK_SECRET}
+    min_level: info
+    only_in_scope: false
+
+apis:
+  - id: worldline-direct                 # exemple réel : spec publique, ETag supporté (checks inchangés = 304)
+    name: Worldline Direct (préprod)
+    owner: equipe-paiement
+    source:
+      url: https://payment.direct.ecom.preprod.worldline-solutions.com/v1/public-contract-definition.yaml
+      type: openapi
+    interval: 1h
+    gateway:
+      exposed_operations:
+        - POST /v2/{merchantId}/payments
+        - GET /v2/{merchantId}/payments/{paymentId}
+        - POST /v2/{merchantId}/hostedcheckouts
+
+  - id: petstore                         # slug stable, ne jamais le renommer (clé de l'historique)
+    name: Swagger Petstore
+    owner: equipe-demo
+    source:
+      url: https://petstore3.swagger.io/api/v3/openapi.json
+      type: openapi                      # openapi | swagger-ui | redoc | html | auto
+
+  - id: partner-x
+    name: Partenaire X — Commandes
+    owner: equipe-commandes
+    source:
+      url: https://developer.partner-x.example/docs/      # page Swagger-UI : la spec est découverte
+      type: swagger-ui
+    auth:
+      type: header                       # header | query | basic | bearer | oauth2_client_credentials | mtls
+      name: X-API-Key
+      value: ${PARTNER_X_DOC_KEY}
+    interval: 1h
+    gateway:
+      # sous-ensemble réellement réexposé dans la Gateway ; les autres changements sont "hors périmètre"
+      exposed_operations:
+        - GET /orders
+        - GET /orders/{orderId}
+        - POST /orders
+    notify: [api-team-gchat, integration-slack]
+
+  - id: partner-z
+    name: Partenaire Z — Référentiel
+    owner: equipe-referentiel
+    source:
+      url: https://api.partner-z.example/v2/openapi.yaml
+      type: openapi
+    auth:
+      type: oauth2_client_credentials    # token mis en cache jusqu'à expiration
+      token_url: https://auth.partner-z.example/oauth/token
+      client_id: ${PARTNER_Z_CLIENT_ID}
+      client_secret: ${file:/run/secrets/partner_z_client_secret}
+      scopes: [api-docs.read]
+
+  - id: partner-w
+    name: Partenaire W (mTLS)
+    owner: equipe-paiement
+    source:
+      url: https://secure.partner-w.example/swagger.json
+      type: openapi
+    auth:
+      type: mtls
+      cert_file: /run/secrets/partner_w.crt
+      key_file: /run/secrets/partner_w.key
+
+  - id: partner-y-legacy
+    name: Partenaire Y (doc HTML seulement)
+    owner: equipe-finance
+    source:
+      url: https://partner-y.example/api-documentation.html
+      type: html                         # mode dégradé : détection de changement de texte, pas de diff sémantique
+    interval: 24h

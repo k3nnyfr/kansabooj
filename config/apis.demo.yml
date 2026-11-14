@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=./apis.schema.json
+# Configuration de démo, exécutable sans secret ni CA : make check API=--all
+defaults:
+  interval: 6h
+  ignore: [$.servers]
+
+http:
+  user_agent: "kansabooj/0.1 (demo)"
+  deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
+
+apis:
+  - id: worldline-direct
+    name: Worldline Direct (préprod)
+    owner: equipe-paiement
+    source:
+      url: https://payment.direct.ecom.preprod.worldline-solutions.com/v1/public-contract-definition.yaml
+      type: openapi
+    gateway:
+      exposed_operations:
+        - POST /v2/{merchantId}/payments
+        - GET /v2/{merchantId}/payments/{paymentId}
+        - POST /v2/{merchantId}/hostedcheckouts
+
+  - id: petstore
+    name: Swagger Petstore
+    owner: equipe-demo
+    source:
+      url: https://petstore3.swagger.io/api/v3/openapi.json
+      type: openapi

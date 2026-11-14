@@ -1,0 +1,9 @@
+bin/
+data/
+*.db
+*.db-*
+config/apis.yml
+.env
+frontend/node_modules/
+frontend/dist/
+backend/internal/httpapi/dist/

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kansabooj.local/apis.schema.json",
+  "title": "Kansabooj — configuration des APIs surveillées",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apis"],
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
+      "description": "Durée Go : 30s, 10m, 6h, 1h30m"
+    },
+    "ignore": {
+      "type": "array",
+      "description": "Chemins retirés avant comparaison (anti-bruit). Sous-ensemble JSONPath : $.a.b, * = n'importe quelle clé.",
+      "items": { "type": "string", "pattern": "^\\$\\.[^.]+(\\.[^.]+)*$" },
+      "examples": [["$.servers", "$.info.x-generated-at", "$.paths.*.x-internal"]]
+    },
+    "level": { "enum": ["error", "warn", "info"] },
+    "auth": {
+      "type": "object",
+      "description": "Authentification pour lire la documentation. Les credentials ne sont envoyés qu'à l'origine de source.url.",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["header", "query", "basic", "bearer", "oauth2_client_credentials", "mtls"] },
+        "name": { "type": "string", "description": "header / query : nom de l'en-tête ou du paramètre" },
+        "value": { "type": "string", "description": "header / query : valeur (utiliser ${ENV_VAR})" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "token": { "type": "string", "description": "bearer : token statique" },
+        "token_url": { "type": "string", "format": "uri" },
+        "client_id": { "type": "string" },
+        "client_secret": { "type": "string" },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "params": { "type": "object", "additionalProperties": { "type": "string" }, "description": "paramètres additionnels de la requête de token (ex : audience)" },
+        "cert_file": { "type": "string" },
+        "key_file": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "type": { "enum": ["header", "query"] } } }, "then": { "required": ["name", "value"] } },
+        { "if": { "properties": { "type": { "const": "basic" } } }, "then": { "required": ["username", "password"] } },
+        { "if": { "properties": { "type": { "const": "bearer" } } }, "then": { "required": ["token"] } },
+        { "if": { "properties": { "type": { "const": "oauth2_client_credentials" } } }, "then": { "required": ["token_url", "client_id", "client_secret"] } },
+        { "if": { "properties": { "type": { "const": "mtls" } } }, "then": { "required": ["cert_file", "key_file"] } }
+      ]
+    }
+  },
+  "properties": {
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval": { "$ref": "#/$defs/duration", "default": "6h" },
+        "jitter": { "$ref": "#/$defs/duration", "default": "5m" },
+        "timeout": { "$ref": "#/$defs/duration", "default": "30s" },
+        "error_threshold": { "type": "integer", "minimum": 1, "default": 3, "description": "échecs consécutifs avant statut stale" },
+        "notify": { "type": "array", "items": { "type": "string" } },
+        "ignore": { "$ref": "#/$defs/ignore" }
+      }
+    },
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proxy": { "type": "string", "description": "proxy sortant ; vide = variables HTTPS_PROXY / HTTP_PROXY" },
+        "ca_bundle": { "type": "string", "description": "fichier PEM de la CA interne (inspection TLS du proxy)" },
+        "user_agent": { "type": "string" },
+        "deny_cidrs": { "type": "array", "items": { "type": "string" } },
+        "max_body_bytes": { "type": "integer", "minimum": 1024, "default": 20971520 }
+      }
+    },
+    "notifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "url"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "enum": ["googlechat", "slack", "teams", "generic"] },
+          "url": { "type": "string" },
+          "secret": { "type": "string", "description": "generic : clé HMAC-SHA256 (en-tête X-Kansabooj-Signature)" },
+          "min_level": { "$ref": "#/$defs/level", "default": "warn" },
+          "only_in_scope": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "apis": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "source"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$", "description": "clé stable de l'historique : ne jamais renommer" },
+          "name": { "type": "string" },
+          "owner": { "type": "string", "description": "équipe propriétaire" },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url"],
+            "properties": {
+              "url": { "type": "string", "pattern": "^https?://" },
+              "type": { "enum": ["openapi", "swagger-ui", "redoc", "html", "auto"], "default": "auto" }
+            }
+          },
+          "auth": { "$ref": "#/$defs/auth" },
+          "interval": { "$ref": "#/$defs/duration" },
+          "timeout": { "$ref": "#/$defs/duration" },
+          "notify": { "type": "array", "items": { "type": "string" } },
+          "ignore": { "$ref": "#/$defs/ignore" },
+          "gateway": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "exposed_operations": {
+                "type": "array",
+                "description": "opérations réexposées dans la Gateway ; * final = préfixe ; noms de paramètres ignorés",
+                "items": { "type": "string", "pattern": "^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\\S*$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
