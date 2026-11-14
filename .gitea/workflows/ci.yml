@@ -90,13 +90,17 @@ jobs:
             SUDO=$(command -v sudo || true)
             $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ca-certificates
           fi
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # Python de la distribution plutôt qu'actions/setup-python : ce dernier ne fournit que des builds
+      # Ubuntu, introuvables sur les images de job Debian (node:*-slim).
       - name: JSON Schema des configurations
         run: |
-          pip install --quiet jsonschema==4.23.0 pyyaml==6.0.2
-          python3 scripts/check-schemas.py
+          if ! python3 -m venv --help >/dev/null 2>&1 || ! python3 -c 'import ensurepip' 2>/dev/null; then
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends python3 python3-venv
+          fi
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet jsonschema==4.23.0 pyyaml==6.0.2
+          "$RUNNER_TEMP/venv/bin/python" scripts/check-schemas.py
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod

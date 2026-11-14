@@ -122,7 +122,8 @@ func TestDenyCIDRs(t *testing.T) {
 	defer s.Close()
 	t.Setenv("HTTPS_PROXY", "")
 	t.Setenv("HTTP_PROXY", "")
-	c, err := New(config.HTTP{UserAgent: "t", MaxBodyBytes: 1024, DenyCIDRs: []string{"127.0.0.0/8"}}, api(s.URL, nil))
+	// both loopbacks: depending on the host, "localhost" resolves to 127.0.0.1 or ::1
+	c, err := New(config.HTTP{UserAgent: "t", MaxBodyBytes: 1024, DenyCIDRs: []string{"127.0.0.0/8", "::1/128"}}, api(s.URL, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
