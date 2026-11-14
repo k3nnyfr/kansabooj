@@ -7,7 +7,7 @@ Surveillance des contrats d'API partenaires réexposées dans l'API Gateway inte
   les classe (breaking / à surveiller / info), les historise et notifie Google Chat / Slack / Teams / webhook générique.
 - Le front liste les APIs avec leur état et affiche la timeline des évolutions de chacune.
 
-Statut : **v0.2** — serveur, interface web (FR/EN), notifications. Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/ROADMAP.md](docs/ROADMAP.md).
+Statut : **v0.3** — serveur, interface web (FR/EN), notifications, groupes & tags, APIs internes, PostgreSQL / Kubernetes. Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Démarrage
 
@@ -23,3 +23,15 @@ CLI : `task check -- --all`, `task history -- worldline-direct`, `task --list` p
 
 Pour ajouter une API : copier un bloc de `config/apis.example.yml` (autocomplétion IDE via `config/apis.schema.json`),
 puis tester sans rien enregistrer : `task check CONFIG=config/apis.yml -- --dry-run mon-api`.
+
+## Déploiement (Kubernetes / OpenShift)
+
+1. Une base PostgreSQL ≥ 12 (ex. `deploy/kubernetes/postgres/cluster.yaml` avec CloudNativePG) exposant un Secret
+   `kansabooj-db-app` avec une clé `uri`.
+2. Un Secret `kansabooj-secrets` (webhooks, clés partenaires référencées en `${VAR}`) et, si besoin, `kansabooj-files`
+   (certificats mTLS, secrets lus via `${file:/run/secrets/kansabooj/...}`).
+3. Adapter `deploy/kubernetes/base/apis.yml` et l'image, puis `kubectl apply -k deploy/kubernetes/overlays/openshift`
+   (ou `overlays/kubernetes`).
+
+La configuration est rechargée à chaud quand le ConfigMap change. Plusieurs réplicas peuvent tourner : une seule
+planifie les checks. Essai local complet : `podman-compose -f deploy/compose.yaml up --build`.

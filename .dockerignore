@@ -1,0 +1,9 @@
+.git
+.task
+bin
+data
+**/node_modules
+frontend/dist
+backend/internal/httpapi/web/dist
+*.db
+config/apis.yml

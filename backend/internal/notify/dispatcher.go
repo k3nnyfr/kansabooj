@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
@@ -63,11 +64,7 @@ func (d *Dispatcher) HandleOutcome(ctx context.Context, api *config.API, o *moni
 	}
 
 	for _, ev := range events {
-		for _, name := range api.Notify {
-			n := notifierByName(cfg, name)
-			if n == nil {
-				continue
-			}
+		for _, n := range recipients(cfg, api) {
 			e, ok := selectFor(ev, n)
 			if !ok {
 				continue
@@ -193,6 +190,19 @@ func (d *Dispatcher) send(ctx context.Context, n *config.Notifier, body []byte) 
 		return fmt.Errorf("HTTP %d : %s", resp.StatusCode, bytes.TrimSpace(msg))
 	}
 	return nil
+}
+
+// recipients are the notifiers listed by the API (or inherited from its group /
+// defaults) plus those subscribed to its group or tags.
+func recipients(cfg *config.Config, api *config.API) []*config.Notifier {
+	var out []*config.Notifier
+	for i := range cfg.Notifiers {
+		n := &cfg.Notifiers[i]
+		if slices.Contains(api.Notify, n.Name) || n.Subscribed(api) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func notifierByName(cfg *config.Config, name string) *config.Notifier {

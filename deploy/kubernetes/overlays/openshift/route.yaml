@@ -1,0 +1,11 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kansabooj
+spec:
+  host: kansabooj.apps.example.com
+  to: { kind: Service, name: kansabooj }
+  port: { targetPort: http }
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

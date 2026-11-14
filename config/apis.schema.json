@@ -181,6 +181,21 @@
           }
         }
       ]
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,49}$",
+      "description": "minuscules, chiffres, - _ . :"
+    },
+    "cidrs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "network": {
+      "type": "string",
+      "description": "profil réseau (http.profiles) ; défaut : default"
     }
   },
   "properties": {
@@ -280,6 +295,40 @@
           "type": "integer",
           "minimum": 1024,
           "default": 20971520
+        },
+        "allow_cidrs": {
+          "$ref": "#/$defs/cidrs",
+          "description": "si non vide, seules ces plages sont joignables"
+        },
+        "profiles": {
+          "type": "object",
+          "description": "profils réseau nommés (ex. internal : APIs internes sans proxy)",
+          "propertyNames": {
+            "not": {
+              "const": "default"
+            }
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "proxy": {
+                "type": "string",
+                "description": "vide = hérite de http.proxy ; none = connexion directe ; sinon URL"
+              },
+              "ca_bundle": {
+                "type": "string"
+              },
+              "deny_cidrs": {
+                "$ref": "#/$defs/cidrs",
+                "description": "absent = hérite ; [] = aucune"
+              },
+              "allow_cidrs": {
+                "$ref": "#/$defs/cidrs",
+                "description": "si non vide, seules ces plages sont joignables"
+              }
+            }
+          }
         }
       }
     },
@@ -326,6 +375,79 @@
               "en"
             ],
             "description": "défaut : server.language"
+          },
+          "subscribe": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "reçoit aussi les notifications des APIs de ces groupes / portant ces tags",
+            "properties": {
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/tag"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "groupes d'APIs portant des valeurs par défaut héritées (API > groupe > defaults)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/tag"
+            }
+          },
+          "interval": {
+            "$ref": "#/$defs/duration"
+          },
+          "timeout": {
+            "$ref": "#/$defs/duration"
+          },
+          "notify": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ignore": {
+            "$ref": "#/$defs/ignore"
+          },
+          "auth": {
+            "$ref": "#/$defs/auth"
+          },
+          "network": {
+            "$ref": "#/$defs/network"
           }
         }
       }
@@ -353,6 +475,19 @@
           "owner": {
             "type": "string",
             "description": "équipe propriétaire"
+          },
+          "group": {
+            "type": "string",
+            "description": "id d'un groupe déclaré dans groups"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/tag"
+            }
+          },
+          "network": {
+            "$ref": "#/$defs/network"
           },
           "source": {
             "type": "object",

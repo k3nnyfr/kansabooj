@@ -20,15 +20,20 @@
 - [x] Notifications `stale` / `recovered`
 - [x] Langue **français / anglais** : langue par défaut (`server.language`), sélecteur dans le front, langue par notifier
 
-## v0.3 — Groupes, tags & APIs internes
-- [ ] **Groupes d'API** (`groups:`) : regroupement (partenaire, domaine, interne/externe…) portant des valeurs par défaut
+## v0.3 — Groupes, tags, APIs internes & Kubernetes ✅ 2026-11-14
+- [x] **PostgreSQL** en production (SQLite conservé en local / CLI), suite de tests exécutable sur les deux (ADR 0004)
+- [x] Multi-réplicas : leader élu par verrou PostgreSQL, verrou par API, enregistrement optimiste des versions
+- [x] Conteneur sans état : config par variables d'environnement, `/readyz`, rechargement à chaud ConfigMap / Secrets
+- [x] Image (Containerfile multi-stage, non-root, compatible UID arbitraire OpenShift), manifests kustomize
+      Kubernetes (Ingress) / OpenShift (Route), exemple CloudNativePG, compose local
+- [x] **Groupes d'API** (`groups:`) : regroupement (partenaire, domaine, interne/externe…) portant des valeurs par défaut
       héritées par les APIs du groupe (owner, interval, notify, auth, profil réseau, ignore)
-- [ ] **Tags** libres par API (`tags: [paiement, pci, critique]`)
-- [ ] Front : filtres et vue regroupée par groupe / tag ; API REST filtrable (`?group=&tag=`)
-- [ ] Routage des notifications par groupe / tag (`notifiers[].filter`)
-- [ ] **Profils réseau** (`http.profiles`) pour les APIs internes : sans proxy, plages internes autorisées
+- [x] **Tags** libres par API (`tags: [paiement, pci, critique]`)
+- [x] Front : filtres et vue regroupée par groupe / tag ; API REST filtrable (`?group=&tag=`)
+- [x] Routage des notifications par groupe / tag (`notifiers[].subscribe`)
+- [x] **Profils réseau** (`http.profiles`) pour les APIs internes : sans proxy, plages internes autorisées
       (`allow_cidrs`), CA dédiée — sans affaiblir le profil « internet » par défaut
-- [ ] JSON Schema + `validate` à jour (groupe inexistant, héritage)
+- [x] JSON Schema + `validate` à jour (groupe inexistant, héritage)
 
 ## v0.3 bis — Mode API / as-code (ADR 0003)
 - [ ] Configuration multi-fichiers `config/apis.d/*.yml` (un fichier par équipe / groupe)
@@ -42,7 +47,8 @@
 - [ ] Mode dégradé `html` (hash du texte extrait)
 - [ ] Specs multi-fichiers (`$ref` externes)
 - [ ] `/metrics` Prometheus (purge des `checks` : fait en v0.2)
-- [ ] Image Docker distroless, déploiement
+- [ ] Chart Helm (si les équipes d'exploitation le préfèrent à kustomize), NetworkPolicy d'egress
+- [ ] CI : tests SQLite + PostgreSQL, build et scan de l'image
 
 ## Plus tard (selon retours)
 - Traduction française des libellés de changements oasdiff (catalogue par `rule_id`, oasdiff n'existant qu'en anglais)

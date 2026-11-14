@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"git.k3nny.fr/kansabooj/internal/config"
-	"git.k3nny.fr/kansabooj/internal/store"
+	"git.k3nny.fr/kansabooj/internal/store/storetest"
 )
 
 const v1 = `openapi: 3.0.3
@@ -78,10 +77,7 @@ apis:
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "k.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := storetest.Open(t)
 	defer st.Close()
 	if err := st.SyncAPIs(ctx, cfg.APIs); err != nil {
 		t.Fatal(err)

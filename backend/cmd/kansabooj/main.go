@@ -74,9 +74,17 @@ type common struct {
 
 func newFlags(name string) *common {
 	c := &common{fs: flag.NewFlagSet(name, flag.ExitOnError)}
-	c.fs.StringVar(&c.config, "config", "config/apis.yml", "fichier de configuration")
-	c.fs.StringVar(&c.db, "db", "data/kansabooj.db", "base SQLite")
+	c.fs.StringVar(&c.config, "config", env("KANSABOOJ_CONFIG", "config/apis.yml"), "fichier de configuration (env KANSABOOJ_CONFIG)")
+	c.fs.StringVar(&c.db, "db", env("KANSABOOJ_DB", "data/kansabooj.db"),
+		"base : URL postgres://… (ou \"postgres\" pour les variables PG*), sinon chemin SQLite (env KANSABOOJ_DB)")
 	return c
+}
+
+func env(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }
 
 func loadConfig(path string) (*config.Config, bool) {
@@ -95,19 +103,26 @@ func runValidate(args []string) int {
 	if !ok {
 		return 1
 	}
-	fmt.Printf("✔ %s valide : %d API(s), %d notifier(s)\n", f.config, len(cfg.APIs), len(cfg.Notifiers))
+	fmt.Printf("✔ %s valide : %d API(s), %d groupe(s), %d notifier(s)\n", f.config, len(cfg.APIs), len(cfg.Groups), len(cfg.Notifiers))
 	for _, a := range cfg.APIs {
 		auth := "sans auth"
 		if a.Auth != nil {
 			auth = "auth " + a.Auth.Type
 		}
-		fmt.Printf("  - %-24s toutes les %-8s %-28s %s\n", a.ID, a.Interval.String(), auth, a.Source.URL)
+		group := a.Group
+		if group == "" {
+			group = "—"
+		}
+		fmt.Printf("  - %-24s groupe %-16s réseau %-10s toutes les %-6s %-28s %s\n", a.ID, group, a.Network, a.Interval.String(), auth, a.Source.URL)
+		if len(a.Tags) > 0 {
+			fmt.Printf("    tags : %s\n", strings.Join(a.Tags, ", "))
+		}
 	}
 	return 0
 }
 
 func openStore(ctx context.Context, path string, cfg *config.Config) (*store.Store, error) {
-	if dir := filepath.Dir(path); dir != "." {
+	if dir := filepath.Dir(path); store.DialectOf(path) == store.SQLite && dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, err
 		}
@@ -142,7 +157,7 @@ func runCheck(ctx context.Context, args []string) int {
 	}
 
 	var st *store.Store
-	if _, err := os.Stat(f.db); !*dry || err == nil {
+	if _, err := os.Stat(f.db); !*dry || err == nil || store.DialectOf(f.db) == store.Postgres {
 		var err error
 		if st, err = openStore(ctx, f.db, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "base de données :", err)
@@ -233,8 +248,9 @@ func formatItem(it diff.Item) string {
 
 func runServe(ctx context.Context, args []string) int {
 	f := newFlags("serve")
-	listen := f.fs.String("listen", "", "adresse d'écoute (défaut : server.listen, :8080)")
-	debug := f.fs.Bool("debug", false, "logs détaillés")
+	listen := f.fs.String("listen", os.Getenv("KANSABOOJ_LISTEN"), "adresse d'écoute (défaut : server.listen, :8080 ; env KANSABOOJ_LISTEN)")
+	watch := f.fs.Duration("watch-config", 30*time.Second, "intervalle de détection des modifications de configuration (0 = désactivé)")
+	debug := f.fs.Bool("debug", os.Getenv("KANSABOOJ_DEBUG") != "", "logs détaillés (env KANSABOOJ_DEBUG)")
 	f.fs.Parse(args)
 
 	level := slog.LevelInfo
@@ -281,6 +297,9 @@ func runServe(ctx context.Context, args []string) int {
 			}
 		}
 	}()
+	if *watch > 0 {
+		go sch.WatchConfig(ctx, *watch)
+	}
 	schedDone := make(chan error, 1)
 	go func() { schedDone <- sch.Run(ctx) }()
 	go func() {
@@ -290,7 +309,7 @@ func runServe(ctx context.Context, args []string) int {
 		srv.Shutdown(shut)
 	}()
 
-	log.Info("kansabooj démarré", "listen", addr, "apis", len(cfg.APIs), "version", httpapi.Version)
+	log.Info("kansabooj démarré", "listen", addr, "apis", len(cfg.APIs), "version", httpapi.Version, "database", st.Dialect())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("serveur HTTP", "err", err)
 		cancel()

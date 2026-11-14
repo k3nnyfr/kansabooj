@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	"git.k3nny.fr/kansabooj/internal/diff"
 	"git.k3nny.fr/kansabooj/internal/monitor"
 	"git.k3nny.fr/kansabooj/internal/store"
+	"git.k3nny.fr/kansabooj/internal/store/storetest"
 )
 
 var items = []diff.Item{
@@ -99,7 +99,7 @@ apis:
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	st, _ := store.Open(ctx, filepath.Join(t.TempDir(), "k.db"))
+	st := storetest.Open(t)
 	defer st.Close()
 	st.SyncAPIs(ctx, cfg.APIs)
 	cur := time.Now()
@@ -142,5 +142,35 @@ apis:
 	d.HandleOutcome(ctx, api, &monitor.Outcome{Status: monitor.StatusUnchanged, PrevStatus: "stale"})
 	if len(bodies) != 4 || !strings.Contains(string(bodies[2]), `"kind":"stale"`) || !strings.Contains(string(bodies[3]), `"kind":"recovered"`) {
 		t.Errorf("stale/recovered not sent: %d bodies", len(bodies))
+	}
+}
+
+func TestRecipientsIncludeSubscriptions(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+notifiers:
+  - { name: team, type: slack, url: "https://h.example/1" }
+  - { name: security, type: slack, url: "https://h.example/2", subscribe: { tags: [pci] } }
+  - { name: platform, type: slack, url: "https://h.example/3", subscribe: { groups: [internal] } }
+groups: [ { id: internal, name: Internal, notify: [] } ]
+apis:
+  - { id: a, name: A, notify: [team], tags: [pci], source: { url: "https://a.example" } }
+  - { id: b, name: B, group: internal, source: { url: "https://b.example" } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(id string) string {
+		a, _ := cfg.API(id)
+		var out []string
+		for _, n := range recipients(cfg, a) {
+			out = append(out, n.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := names("a"); got != "team,security" {
+		t.Errorf("a → %s", got)
+	}
+	if got := names("b"); got != "platform" {
+		t.Errorf("b → %s (group notify: [] must override defaults)", got)
 	}
 }

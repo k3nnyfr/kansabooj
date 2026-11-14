@@ -125,3 +125,89 @@ func TestDurationString(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupsInheritanceProfilesAndSubscriptions(t *testing.T) {
+	c, err := Parse([]byte(`
+defaults: { interval: 6h, notify: [team], ignore: [$.servers] }
+http:
+  proxy: http://proxy.corp:3128
+  deny_cidrs: [10.0.0.0/8]
+  profiles:
+    internal: { proxy: none, allow_cidrs: [10.0.0.0/8], deny_cidrs: [] }
+notifiers:
+  - { name: team, type: slack, url: "https://hooks.example/a" }
+  - { name: security, type: googlechat, url: "https://chat.example/b", subscribe: { tags: [pci] } }
+  - { name: internal-chan, type: slack, url: "https://hooks.example/c", subscribe: { groups: [internal] } }
+groups:
+  - id: internal
+    name: APIs internes
+    owner: platform
+    interval: 15m
+    network: internal
+    tags: [internal]
+    ignore: [$.info.x-build]
+    auth: { type: bearer, token: t0k }
+apis:
+  - id: billing
+    name: Billing
+    group: internal
+    tags: [pci, internal]
+    source: { url: "https://billing.svc.cluster.local/openapi.json" }
+  - id: stripe
+    name: Stripe
+    tags: [pci]
+    interval: 1h
+    source: { url: "https://stripe.example/spec.json" }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := c.API("billing")
+	if b.Owner != "platform" || b.Interval.String() != "15m" || b.Network != "internal" || b.Auth == nil || b.Auth.Token != "t0k" {
+		t.Errorf("group values not inherited: %+v", b)
+	}
+	if strings.Join(b.Tags, ",") != "internal,pci" || len(b.Ignore) != 2 {
+		t.Errorf("tags/ignore merge: %v %v", b.Tags, b.Ignore)
+	}
+	s, _ := c.API("stripe")
+	if s.Network != DefaultProfile || s.Interval.String() != "1h" || s.Group != "" {
+		t.Errorf("stripe defaults: %+v", s)
+	}
+
+	eff := c.HTTP.ForProfile(b.Network)
+	if eff.Proxy != "none" || len(eff.DenyCIDRs) != 0 || eff.AllowCIDRs[0] != "10.0.0.0/8" {
+		t.Errorf("internal profile = %+v", eff)
+	}
+	if d := c.HTTP.ForProfile(s.Network); d.Proxy != "http://proxy.corp:3128" || len(d.DenyCIDRs) != 1 {
+		t.Errorf("default profile = %+v", d)
+	}
+
+	sec, chat := &c.Notifiers[1], &c.Notifiers[2]
+	if !sec.Subscribed(b) || !sec.Subscribed(s) || !chat.Subscribed(b) || chat.Subscribed(s) {
+		t.Error("subscriptions mismatch")
+	}
+}
+
+func TestGroupValidation(t *testing.T) {
+	_, err := Parse([]byte(`
+http: { profiles: { default: {}, lan: { proxy: "nope" } } }
+notifiers:
+  - { name: n, type: slack, url: "https://x.example", subscribe: { groups: [ghost] } }
+groups:
+  - { id: g, name: G, network: wan, tags: ["Bad Tag"], auth: { type: basic } }
+  - { id: g, name: G2 }
+apis:
+  - { id: a, name: A, group: missing, network: lan2, tags: [UPPER], source: { url: "https://a.example" } }
+  - { id: b, name: B, group: g, source: { url: "https://b.example" } }
+`))
+	msg := err.Error()
+	for _, want := range []string{"nom réservé", `"none" ou URL`, "groupe \"ghost\" inconnu", "profil réseau \"wan\"", "Bad Tag",
+		"id de groupe en double", "groupe \"missing\" non déclaré", "profil réseau \"lan2\"", "UPPER", "username obligatoire"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q in:\n%s", want, msg)
+		}
+	}
+	if strings.Count(msg, "username obligatoire") != 1 {
+		t.Errorf("inherited auth problem should be reported once:\n%s", msg)
+	}
+}

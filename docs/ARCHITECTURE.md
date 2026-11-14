@@ -128,9 +128,18 @@ Voir **ADR 0003**. En bref : la configuration *est* déjà du code (YAML version
 on documente l'API REST (spec OpenAPI de Kansabooj lui-même) et on ajoute une validation de config appelable depuis la CI.
 On n'ouvre pas de CRUD d'APIs par HTTP (double source de vérité + SSRF) sans besoin concret.
 
-### 2.11 Scheduling et haute dispo
-Une instance unique avec scheduler interne suffit largement (quelques centaines d'APIs, check toutes les heures = négligeable).
-Pas de Kafka, pas de Redis, pas de worker séparé. Si HA requise plus tard : verrou en base (advisory lock Postgres) pour élire le scheduler.
+### 2.11 Déploiement Kubernetes / OpenShift, scheduling et haute dispo
+Cible principale : OpenShift / Kubernetes, avec **le moins d'adhérence possible aux fichiers** (ADR 0004).
+- Conteneur **sans état** : état en PostgreSQL, configuration en ConfigMap, secrets en Secret (variables
+  d'environnement ou fichiers `${file:}`), logs JSON sur stdout, racine en lecture seule, UID arbitraire (OpenShift).
+- **Rechargement à chaud** : Kansabooj surveille l'empreinte du YAML *et* des fichiers secrets qu'il référence ;
+  une mise à jour du ConfigMap ou une rotation de Secret est prise en compte sans redémarrage.
+  Une configuration invalide est refusée et l'ancienne conservée.
+- **Plusieurs réplicas** : un seul *leader* (verrou consultatif PostgreSQL) planifie les checks ; les autres servent
+  l'interface et l'API. Bascule automatique si le leader disparaît (perte de session = perte du verrou).
+- Sondes : `/healthz` (liveness, processus) et `/readyz` (readiness, base joignable).
+- Manifests kustomize dans `deploy/kubernetes` (overlays `kubernetes` → Ingress, `openshift` → Route),
+  exemple de base CloudNativePG, `deploy/compose.yaml` pour un essai local.
 
 ## 3. Choix techniques
 
@@ -139,9 +148,9 @@ Pas de Kafka, pas de Redis, pas de worker séparé. Si HA requise plus tard : ve
 | Backend | **Go** | oasdiff et kin-openapi sont des **bibliothèques Go** : diff sémantique, classification breaking, conversion Swagger 2 → OAS 3, résolution de `$ref`. En Python/Node il faudrait shell-out vers le binaire oasdiff. Binaire unique, facile à déployer. |
 | Diff | `github.com/oasdiff/oasdiff` | Référence du marché, ~300 règles de détection, niveaux ERR/WARN/INFO |
 | Parsing | `github.com/getkin/kin-openapi` | OAS 3.0/3.1 + `openapi2conv` |
-| Stockage | **SQLite** (pure Go `modernc.org/sqlite`) | ~20-100 APIs, une instance, zéro ops. Migrations SQL versionnées. Postgres seulement si HA requise. |
+| Stockage | **PostgreSQL** en production, **SQLite** en local/CLI (ADR 0004) | Déploiement Kubernetes/OpenShift sans état et multi-réplicas ; SQL portable, migrations par dialecte. |
 | Front | **React + Vite + TypeScript**, TanStack Query, embarqué via `go:embed` | Un seul artefact à déployer |
-| Scheduler | interne (`time.Ticker` + jitter, ou `robfig/cron`) | pas besoin d'infra |
+| Scheduler | interne (`time.Ticker` + jitter), leader élu par verrou PostgreSQL | pas d'infra supplémentaire, HA native |
 | Notifs | notifiers typés : `slack` (Block Kit), `googlechat` (cardsV2), `teams`, `generic` (JSON signé HMAC) | les formats diffèrent vraiment entre plateformes |
 | Observabilité | `/healthz`, `/metrics` Prometheus, logs JSON (`log/slog`) | |
 | Auth front | reverse proxy SSO (header `X-Forwarded-User`) | le front est read-only sauf l'acquittement |
@@ -166,9 +175,9 @@ scheduler ──► fetch (discover si besoin, proxy, auth, ETag)
 
 ## 5. Modèle de données
 
-Voir `backend/internal/store/migrations/0001_init.sql`. En résumé :
+Voir `backend/internal/store/migrations/{postgres,sqlite}/`. En résumé :
 
-- `apis` — miroir du YAML (+ `enabled`, `resolved_spec_url`, état courant)
+- `apis` — miroir du YAML (+ `enabled`, `group_id`, `tags`, `network_profile`, `resolved_spec_url`, état courant)
 - `blobs` — specs brutes et normalisées, content-addressed (sha256, compressées zstd/gzip)
 - `snapshots` — une ligne **par version distincte** d'une API (pas par check)
 - `checks` — journal léger de chaque exécution (statut, durée, http, erreur) — purgé après N jours
@@ -202,7 +211,7 @@ Voir `backend/internal/store/migrations/0001_init.sql`. En résumé :
 
 - Outil **agnostique de la plateforme de Gateway** (besoin global) — pas de connecteur propriétaire.
 - Appels sortants via le **proxy d'entreprise**.
-- Volumétrie : **une vingtaine d'APIs et plus** → SQLite confirmé, instance unique.
+- Volumétrie : **une vingtaine d'APIs et plus**, déploiement **Kubernetes / OpenShift** → PostgreSQL, multi-réplicas (ADR 0004, révisé le 2026-11-14).
 - **Authentification** sur une partie des sources → dans le périmètre v0.1 (§2.6).
 - **Go** validé ; l'outil doit être utilisable par n'importe quelle équipe (§2.9 bis).
 

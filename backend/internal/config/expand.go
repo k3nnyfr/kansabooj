@@ -15,29 +15,30 @@ var refPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 // expandNode resolves references in every scalar value of the tree (not in keys,
 // not in comments). Expansion happens after parsing, so secrets containing YAML
 // special characters cannot break the document.
-func expandNode(n *yaml.Node, problems *[]string) {
+func expandNode(n *yaml.Node, problems *[]string, files *[]string) {
 	switch n.Kind {
 	case yaml.DocumentNode, yaml.SequenceNode:
 		for _, c := range n.Content {
-			expandNode(c, problems)
+			expandNode(c, problems, files)
 		}
 	case yaml.MappingNode:
 		for i := 1; i < len(n.Content); i += 2 {
-			expandNode(n.Content[i], problems)
+			expandNode(n.Content[i], problems, files)
 		}
 	case yaml.ScalarNode:
 		if strings.Contains(n.Value, "${") {
-			n.Value = expandString(n.Value, n.Line, problems)
+			n.Value = expandString(n.Value, n.Line, problems, files)
 			n.Tag = "!!str"
 			n.Style = 0
 		}
 	}
 }
 
-func expandString(s string, line int, problems *[]string) string {
+func expandString(s string, line int, problems *[]string, files *[]string) string {
 	return refPattern.ReplaceAllStringFunc(s, func(m string) string {
 		ref := m[2 : len(m)-1]
 		if path, ok := strings.CutPrefix(ref, "file:"); ok {
+			*files = append(*files, path)
 			b, err := os.ReadFile(path)
 			if err != nil {
 				*problems = append(*problems, fmt.Sprintf("ligne %d : fichier secret %q illisible : %v", line, path, err))

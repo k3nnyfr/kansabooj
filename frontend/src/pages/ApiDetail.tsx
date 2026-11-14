@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, type CheckResult, type TimelineEntry } from '../api/client'
-import { CheckButton, Counts, ErrorHint, LevelBadge, StatusBadge } from '../components/common'
+import { CheckButton, Counts, ErrorHint, LevelBadge, StatusBadge, TagList } from '../components/common'
 import { useI18n } from '../i18n'
 
 export function ApiDetail() {
@@ -14,6 +14,7 @@ export function ApiDetail() {
   const [lastCheck, setLastCheck] = useState<CheckResult>()
 
   const detail = useQuery({ queryKey: ['api', id], queryFn: () => api.get(id), refetchInterval: 60_000 })
+  const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, staleTime: Infinity })
   const timeline = useInfiniteQuery({
     queryKey: ['timeline', id],
     queryFn: ({ pageParam }) => api.timeline(id, pageParam),
@@ -42,6 +43,16 @@ export function ApiDetail() {
             {' · '}
             <span title={date(a.last_checked_at)}>{t('col.lastCheck')} {relative(a.last_checked_at)}</span>
           </div>
+          {(a.group || a.tags.length > 0) && (
+            <div className="small head-tags">
+              {a.group && (
+                <Link to={`/?group=${encodeURIComponent(a.group)}`} className="group-link">
+                  {meta.data?.groups.find((g) => g.id === a.group)?.name ?? a.group}
+                </Link>
+              )}
+              <TagList tags={a.tags} />
+            </div>
+          )}
           <div className="small">
             {t('detail.source')} : <a href={a.source_url} target="_blank" rel="noreferrer" className="mono">{a.source_url}</a>
           </div>
@@ -81,6 +92,12 @@ export function ApiDetail() {
             <ul className="scope mono small">{scope.map((op) => <li key={op}>{op}</li>)}</ul>
           ) : (
             <p className="small muted">{t('detail.scope.all')}</p>
+          )}
+          {a.network !== 'default' && (
+            <>
+              <h2>{t('detail.network')}</h2>
+              <p className="mono small">{a.network}</p>
+            </>
           )}
           <h2>{t('detail.checks')}</h2>
           <ul className="checks small">

@@ -9,34 +9,60 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/diff"
 )
 
-//go:embed migrations/*.sql
+// ErrConcurrentUpdate means another check recorded a version of the same API in the meantime.
+var ErrConcurrentUpdate = errors.New("version enregistrée entre-temps par un autre check")
+
+//go:embed migrations/sqlite/*.sql migrations/postgres/*.sql
 var migrations embed.FS
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *rdb
+	path string
+}
 
-// Open opens (or creates) the database and applies pending migrations.
-func Open(ctx context.Context, path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
+// Open opens the database designated by dsn (PostgreSQL URL or SQLite file path,
+// see DialectOf) and applies pending migrations.
+func Open(ctx context.Context, dsn string) (*Store, error) {
+	dialect := DialectOf(dsn)
+	var db *sql.DB
+	var err error
+	if dialect == Postgres {
+		if dsn == "postgres" {
+			dsn = "" // libpq environment variables: PGHOST, PGUSER, PGPASSWORD, PGDATABASE…
+		}
+		db, err = sql.Open("pgx", dsn)
+		if err == nil {
+			db.SetMaxOpenConns(10)
+			db.SetConnMaxIdleTime(5 * time.Minute)
+			err = db.PingContext(ctx)
+		}
+	} else {
+		db, err = sql.Open("sqlite", "file:"+dsn+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+		if err == nil {
+			db.SetMaxOpenConns(1) // single writer; volume is tiny
+		}
 	}
-	db.SetMaxOpenConns(1) // single writer; volume is tiny
-	s := &Store{db: db}
+	if err != nil {
+		return nil, fmt.Errorf("connexion à la base (%s) : %w", dialect, err)
+	}
+	s := &Store{db: &rdb{DB: db, dialect: dialect}, path: dsn}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -46,16 +72,28 @@ func Open(ctx context.Context, path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Dialect returns "postgres" or "sqlite".
+func (s *Store) Dialect() string { return s.db.dialect }
+
+// Ping checks the database is reachable (readiness probe).
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
 func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL)`); err != nil {
 		return err
 	}
-	names, err := fs.Glob(migrations, "migrations/*.sql")
+	// names used to include the directory (v0.1/v0.2, SQLite only)
+	if _, err := s.db.ExecContext(ctx, `UPDATE schema_migrations SET name = replace(name, 'migrations/', '') WHERE name LIKE 'migrations/%'`); err != nil {
+		return err
+	}
+	dir := "migrations/" + s.db.dialect
+	paths, err := fs.Glob(migrations, dir+"/*.sql")
 	if err != nil {
 		return err
 	}
-	sort.Strings(names)
-	for _, name := range names {
+	sort.Strings(paths)
+	for _, p := range paths {
+		name := path.Base(p)
 		var n int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE name = ?`, name).Scan(&n); err != nil {
 			return err
@@ -63,9 +101,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		if n > 0 {
 			continue
 		}
-		body, _ := migrations.ReadFile(name)
-		err := s.tx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
+		body, _ := migrations.ReadFile(p)
+		err := s.tx(ctx, func(tx *rtx) error {
+			if _, err := tx.Tx.ExecContext(ctx, string(body)); err != nil { // no placeholders: multi-statement script
 				return err
 			}
 			_, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, now())
@@ -81,26 +119,27 @@ func (s *Store) migrate(ctx context.Context) error {
 // SyncAPIs mirrors the configuration: upserts declared APIs and disables the
 // others. History is never deleted.
 func (s *Store) SyncAPIs(ctx context.Context, apis []config.API) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *rtx) error {
 		ids := make([]any, 0, len(apis))
 		for _, a := range apis {
 			ids = append(ids, a.ID)
 			_, err := tx.ExecContext(ctx, `
-INSERT INTO apis (id, name, owner, source_url, source_type, config_json, enabled, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+INSERT INTO apis (id, name, owner, source_url, source_type, config_json, group_id, tags, network_profile, enabled, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
 ON CONFLICT (id) DO UPDATE SET
   name = excluded.name, owner = excluded.owner, source_type = excluded.source_type,
-  config_json = excluded.config_json, enabled = 1, updated_at = excluded.updated_at,
+  group_id = excluded.group_id, tags = excluded.tags, network_profile = excluded.network_profile,
+  config_json = excluded.config_json, enabled = TRUE, updated_at = excluded.updated_at,
   -- a new source URL invalidates the HTTP validators
   etag = CASE WHEN apis.source_url = excluded.source_url THEN apis.etag END,
   last_modified = CASE WHEN apis.source_url = excluded.source_url THEN apis.last_modified END,
   source_url = excluded.source_url`,
-				a.ID, a.Name, a.Owner, a.Source.URL, a.Source.Type, a.PublicJSON(), now())
+				a.ID, a.Name, a.Owner, a.Source.URL, a.Source.Type, a.PublicJSON(), nullIfEmpty(a.Group), tagsJSON(a.Tags), a.Network, now())
 			if err != nil {
 				return fmt.Errorf("sync %s : %w", a.ID, err)
 			}
 		}
-		q := `UPDATE apis SET enabled = 0, updated_at = ? WHERE enabled = 1`
+		q := `UPDATE apis SET enabled = FALSE, updated_at = ? WHERE enabled = TRUE`
 		args := []any{now()}
 		if len(ids) > 0 {
 			q += ` AND id NOT IN (?` + strings.Repeat(",?", len(ids)-1) + `)`
@@ -191,7 +230,7 @@ type CheckRecord struct {
 
 // RecordUnchanged logs a successful check without contract change.
 func (s *Store) RecordUnchanged(ctx context.Context, c CheckRecord) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *rtx) error {
 		if err := insertCheck(ctx, tx, c, nil); err != nil {
 			return err
 		}
@@ -203,7 +242,7 @@ func (s *Store) RecordUnchanged(ctx context.Context, c CheckRecord) error {
 // Errors never create snapshots or changes.
 func (s *Store) RecordError(ctx context.Context, c CheckRecord, staleThreshold int) (int, error) {
 	var count int
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *rtx) error {
 		if err := insertCheck(ctx, tx, c, nil); err != nil {
 			return err
 		}
@@ -239,7 +278,7 @@ type NewVersion struct {
 // It returns the change id.
 func (s *Store) SaveNewVersion(ctx context.Context, v NewVersion) (int64, error) {
 	var changeID int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *rtx) error {
 		rawSHA, err := putBlob(ctx, tx, v.Raw, v.RawMedia)
 		if err != nil {
 			return err
@@ -278,8 +317,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 		if err := insertCheck(ctx, tx, v.Check, &snapID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE apis SET current_snapshot_id = ? WHERE id = ?`, snapID, v.Check.APIID); err != nil {
+		// Optimistic concurrency: another replica may have recorded a version meanwhile.
+		res, err := tx.ExecContext(ctx, `UPDATE apis SET current_snapshot_id = ? WHERE id = ? AND current_snapshot_id IS NOT DISTINCT FROM ?`, snapID, v.Check.APIID, v.PrevSnapID)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrConcurrentUpdate
 		}
 		return markOK(ctx, tx, v.Check)
 	})
@@ -313,21 +357,21 @@ FROM changes WHERE api_id = ? ORDER BY detected_at DESC, id DESC LIMIT ?`, apiID
 	return out, rows.Err()
 }
 
-func insertCheck(ctx context.Context, tx *sql.Tx, c CheckRecord, snapID *int64) error {
+func insertCheck(ctx context.Context, tx *rtx, c CheckRecord, snapID *int64) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO checks (api_id, started_at, duration_ms, trigger, status, error_kind, http_status, error, snapshot_id)
 VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?)`,
 		c.APIID, c.StartedAt, c.Duration.Milliseconds(), c.Trigger, c.Status, c.ErrorKind, c.HTTPStatus, c.Error, snapID)
 	return err
 }
 
-func markOK(ctx context.Context, tx *sql.Tx, c CheckRecord) error {
+func markOK(ctx context.Context, tx *rtx, c CheckRecord) error {
 	_, err := tx.ExecContext(ctx, `UPDATE apis SET status = 'ok', last_error = NULL, consecutive_errors = 0, last_checked_at = ?,
   etag = COALESCE(NULLIF(?, ''), etag), last_modified = COALESCE(NULLIF(?, ''), last_modified) WHERE id = ?`,
 		c.StartedAt, c.ETag, c.LastMod, c.APIID)
 	return err
 }
 
-func putBlob(ctx context.Context, tx *sql.Tx, content []byte, media string) (string, error) {
+func putBlob(ctx context.Context, tx *rtx, content []byte, media string) (string, error) {
 	sum := sha256.Sum256(content)
 	sha := hex.EncodeToString(sum[:])
 	var buf bytes.Buffer
@@ -339,11 +383,12 @@ func putBlob(ctx context.Context, tx *sql.Tx, content []byte, media string) (str
 	return sha, err
 }
 
-func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Store) tx(ctx context.Context, fn func(*rtx) error) error {
+	sqlTx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	tx := &rtx{Tx: sqlTx, dialect: s.db.dialect}
 	if err := fn(tx); err != nil {
 		tx.Rollback()
 		return err
@@ -352,3 +397,18 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 }
 
 func now() time.Time { return time.Now().UTC() }
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func tagsJSON(tags []string) string {
+	if len(tags) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(tags)
+	return string(b)
+}

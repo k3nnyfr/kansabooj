@@ -67,15 +67,21 @@ type Response struct {
 type Client struct {
 	http      *http.Client
 	deny      []*net.IPNet
+	allow     []*net.IPNet // when non-empty, only these ranges are reachable
 	maxBody   int64
 	userAgent string
 	direct    bool // no proxy: the dialer enforces deny_cidrs itself
 	authHint  string
 }
 
-// New builds a client for api using the global HTTP settings.
-func New(h config.HTTP, api *config.API) (*Client, error) {
+// New builds a client for api using the HTTP settings of its network profile.
+func New(global config.HTTP, api *config.API) (*Client, error) {
+	h := global.ForProfile(api.Network)
 	deny, err := parseCIDRs(h.DenyCIDRs)
+	if err != nil {
+		return nil, err
+	}
+	allow, err := parseCIDRs(h.AllowCIDRs)
 	if err != nil {
 		return nil, err
 	}
@@ -92,28 +98,21 @@ func New(h config.HTTP, api *config.API) (*Client, error) {
 		tlsCfg.Certificates = []tls.Certificate{cert}
 	}
 
-	proxy := http.ProxyFromEnvironment
-	direct := os.Getenv("HTTPS_PROXY") == "" && os.Getenv("https_proxy") == "" &&
-		os.Getenv("HTTP_PROXY") == "" && os.Getenv("http_proxy") == ""
-	if h.Proxy != "" {
-		pu, err := url.Parse(h.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("http.proxy invalide : %w", err)
-		}
-		proxy = http.ProxyURL(pu)
-		direct = false
+	proxy, direct, err := proxyFunc(h.Proxy)
+	if err != nil {
+		return nil, err
 	}
 
-	c := &Client{deny: deny, maxBody: h.MaxBodyBytes, userAgent: h.UserAgent, direct: direct}
+	c := &Client{deny: deny, allow: allow, maxBody: h.MaxBodyBytes, userAgent: h.UserAgent, direct: direct}
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	if direct && len(deny) > 0 {
+	if direct && (len(deny) > 0 || len(allow) > 0) {
 		// Without a proxy we connect to the target ourselves: check the IP actually dialed,
 		// which also defeats DNS rebinding between the pre-check and the connection.
 		dialer.Control = func(_, address string, _ syscall.RawConn) error {
 			host, _, _ := net.SplitHostPort(address)
 			if ip := net.ParseIP(host); ip != nil && c.denied(ip) {
-				return &Error{Kind: KindDenied, Msg: fmt.Sprintf("connexion refusée vers %s (plage interdite par http.deny_cidrs)", ip)}
+				return &Error{Kind: KindDenied, Msg: fmt.Sprintf("connexion refusée vers %s (politique réseau du profil %q : deny_cidrs / allow_cidrs)", ip, api.Network)}
 			}
 			return nil
 		}
@@ -180,13 +179,9 @@ func OutboundTransport(h config.HTTP) (*http.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	proxy := http.ProxyFromEnvironment
-	if h.Proxy != "" {
-		pu, err := url.Parse(h.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("http.proxy invalide : %w", err)
-		}
-		proxy = http.ProxyURL(pu)
+	proxy, _, err := proxyFunc(h.Proxy)
+	if err != nil {
+		return nil, err
 	}
 	return &http.Transport{Proxy: proxy, TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true,
 		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second, IdleConnTimeout: 90 * time.Second}, nil
@@ -265,13 +260,13 @@ func (c *Client) checkTarget(ctx context.Context, u *url.URL) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return &Error{Kind: KindDenied, Msg: fmt.Sprintf("schéma %q non autorisé", u.Scheme)}
 	}
-	if len(c.deny) == 0 {
+	if len(c.deny) == 0 && len(c.allow) == 0 {
 		return nil
 	}
 	host := u.Hostname()
 	if ip := net.ParseIP(host); ip != nil {
 		if c.denied(ip) {
-			return &Error{Kind: KindDenied, Msg: fmt.Sprintf("%s est dans une plage interdite (http.deny_cidrs)", host)}
+			return &Error{Kind: KindDenied, Msg: fmt.Sprintf("%s n'est pas autorisé par la politique réseau (deny_cidrs / allow_cidrs)", host)}
 		}
 		return nil
 	}
@@ -286,7 +281,7 @@ func (c *Client) checkTarget(ctx context.Context, u *url.URL) error {
 	}
 	for _, a := range addrs {
 		if c.denied(a.IP) {
-			return &Error{Kind: KindDenied, Msg: fmt.Sprintf("%s résout vers %s, plage interdite (http.deny_cidrs)", host, a.IP)}
+			return &Error{Kind: KindDenied, Msg: fmt.Sprintf("%s résout vers %s, non autorisé par la politique réseau (deny_cidrs / allow_cidrs)", host, a.IP)}
 		}
 	}
 	return nil
@@ -298,7 +293,34 @@ func (c *Client) denied(ip net.IP) bool {
 			return true
 		}
 	}
-	return false
+	if len(c.allow) == 0 {
+		return false
+	}
+	for _, n := range c.allow {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// proxyFunc returns the proxy selector for a setting: "" = environment
+// (HTTPS_PROXY…), "none" = direct connection, otherwise a proxy URL. direct
+// reports whether connections go straight to the target.
+func proxyFunc(setting string) (func(*http.Request) (*url.URL, error), bool, error) {
+	switch setting {
+	case "none":
+		return nil, true, nil
+	case "":
+		direct := os.Getenv("HTTPS_PROXY") == "" && os.Getenv("https_proxy") == "" &&
+			os.Getenv("HTTP_PROXY") == "" && os.Getenv("http_proxy") == ""
+		return http.ProxyFromEnvironment, direct, nil
+	}
+	pu, err := url.Parse(setting)
+	if err != nil || pu.Host == "" {
+		return nil, false, fmt.Errorf("proxy invalide %q", setting)
+	}
+	return http.ProxyURL(pu), false, nil
 }
 
 func parseCIDRs(list []string) ([]*net.IPNet, error) {

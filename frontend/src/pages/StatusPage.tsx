@@ -18,6 +18,8 @@ export function StatusPage() {
       <section className="card">
         <h2>{t('status.scheduler')}</h2>
         <dl className="kv">
+          <dt>{t('status.instance')}</dt><dd className="mono">{s.scheduler.instance}</dd>
+          <dt>{t('status.role')}</dt><dd>{s.scheduler.leader ? t('status.leader') : t('status.follower')}</dd>
           <dt>{t('status.lastTick')}</dt><dd title={date(s.scheduler.last_tick)}>{relative(s.scheduler.last_tick)}</dd>
           <dt>{t('status.configAt')}</dt><dd>{date(s.scheduler.config_loaded_at)}</dd>
           <dt>{t('status.running')}</dt><dd className="mono">{s.scheduler.running.join(', ') || t('status.none')}</dd>

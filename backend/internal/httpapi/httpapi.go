@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,7 +47,8 @@ func New(rt Runtime, st *store.Store, log *slog.Logger) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }) // liveness
+	mux.HandleFunc("GET /readyz", s.ready)                                                                 // readiness
 	mux.HandleFunc("GET /api/meta", s.meta)
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/apis", s.listAPIs)
@@ -63,13 +65,38 @@ func (s *Server) Handler() http.Handler {
 	return s.logged(mux)
 }
 
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.store.Ping(ctx); err != nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Write([]byte("ok"))
+}
+
 func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 	cfg := s.rt.Config()
+	groups := cfg.Groups
+	if groups == nil {
+		groups = []config.Group{}
+	}
+	tags := []string{}
+	for _, a := range cfg.APIs {
+		for _, t := range a.Tags {
+			if !slices.Contains(tags, t) {
+				tags = append(tags, t)
+			}
+		}
+	}
+	slices.Sort(tags)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":   Version,
 		"language":  cfg.Server.Language,
 		"languages": config.Languages,
 		"user":      s.user(r),
+		"groups":    groups, // secrets and technical defaults are not serialized (json:"-")
+		"tags":      tags,
 	})
 }
 
@@ -89,12 +116,20 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAPIs(w http.ResponseWriter, r *http.Request) {
-	apis, err := s.store.ListAPIs(r.Context(), r.URL.Query().Get("all") == "1")
+	q := r.URL.Query()
+	apis, err := s.store.ListAPIs(r.Context(), q.Get("all") == "1")
 	if err != nil {
 		s.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, apis)
+	group, tag := q.Get("group"), q.Get("tag")
+	out := apis[:0]
+	for _, a := range apis {
+		if (group == "" || a.Group == group) && (tag == "" || slices.Contains(a.Tags, tag)) {
+			out = append(out, a)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) getAPI(w http.ResponseWriter, r *http.Request) {

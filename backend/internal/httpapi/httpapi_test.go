@@ -16,6 +16,7 @@ import (
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/scheduler"
 	"git.k3nny.fr/kansabooj/internal/store"
+	"git.k3nny.fr/kansabooj/internal/store/storetest"
 )
 
 const v1 = `{"openapi":"3.0.3","info":{"title":"T","version":"1"},"paths":{"/x":{"get":{"responses":{"200":{"description":"ok"}}}}}}`
@@ -30,9 +31,12 @@ func TestAPIFlow(t *testing.T) {
 	path := filepath.Join(dir, "apis.yml")
 	os.WriteFile(path, []byte(`
 server: { language: en }
+groups: [ { id: partners, name: Partners, tags: [external] } ]
 apis:
   - id: p
     name: Partner
+    group: partners
+    tags: [pci]
     source: { url: "`+partner.URL+`/spec.json" }
     auth: { type: header, name: X-Key, value: top-secret }
 `), 0o600)
@@ -41,7 +45,7 @@ apis:
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	st, _ := store.Open(ctx, filepath.Join(dir, "k.db"))
+	st := storetest.Open(t)
 	defer st.Close()
 	st.SyncAPIs(ctx, cfg.APIs)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -73,7 +77,7 @@ apis:
 
 	var meta map[string]any
 	call("GET", "/api/meta", 200, &meta)
-	if meta["language"] != "en" || meta["user"] != "alice" {
+	if meta["language"] != "en" || meta["user"] != "alice" || len(meta["groups"].([]any)) != 1 || len(meta["tags"].([]any)) != 2 {
 		t.Errorf("meta = %v", meta)
 	}
 	call("POST", "/api/apis/p/check", 200, nil)
@@ -94,6 +98,18 @@ apis:
 	if strings.Contains(detail, "top-secret") {
 		t.Error("secret leaked in API detail")
 	}
+	if list[0].Group != "partners" || strings.Join(list[0].Tags, ",") != "external,pci" {
+		t.Errorf("group/tags = %q %v", list[0].Group, list[0].Tags)
+	}
+	call("GET", "/api/apis?tag=pci&group=partners", 200, &list)
+	if len(list) != 1 {
+		t.Errorf("filter should match: %d", len(list))
+	}
+	call("GET", "/api/apis?tag=nope", 200, &list)
+	if len(list) != 0 {
+		t.Errorf("filter should exclude: %d", len(list))
+	}
+	call("GET", "/readyz", 200, nil)
 	var tl []store.TimelineEntry
 	call("GET", "/api/apis/p/timeline", 200, &tl)
 	if len(tl) != 2 {

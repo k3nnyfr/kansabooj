@@ -17,8 +17,9 @@ func (e *ValidationError) Error() string {
 }
 
 var (
-	idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	opPattern = regexp.MustCompile(`^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\S*$`)
+	idPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	tagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]{0,49}$`)
+	opPattern  = regexp.MustCompile(`^(GET|PUT|POST|DELETE|PATCH|HEAD|OPTIONS|TRACE) /\S*$`)
 
 	sourceTypes   = []string{SourceOpenAPI, SourceSwaggerUI, SourceRedoc, SourceHTML, SourceAuto}
 	notifierTypes = []string{"googlechat", "slack", "teams", "generic"}
@@ -43,10 +44,31 @@ func validate(c *Config) []string {
 			add("http.proxy : URL de proxy invalide %q", c.HTTP.Proxy)
 		}
 	}
-	for _, cidr := range c.HTTP.DenyCIDRs {
-		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			add("http.deny_cidrs : CIDR invalide %q", cidr)
+	checkCIDRs := func(where string, list []string) {
+		for _, cidr := range list {
+			if _, _, err := net.ParseCIDR(cidr); err != nil {
+				add("%s : CIDR invalide %q", where, cidr)
+			}
 		}
+	}
+	checkCIDRs("http.deny_cidrs", c.HTTP.DenyCIDRs)
+	checkCIDRs("http.allow_cidrs", c.HTTP.AllowCIDRs)
+	for name, prof := range c.HTTP.Profiles {
+		where := "http.profiles." + name
+		if name == DefaultProfile {
+			add("%s : nom réservé (le profil par défaut correspond aux réglages http de premier niveau)", where)
+		}
+		if prof.Proxy != "" && prof.Proxy != "none" {
+			if u, err := url.Parse(prof.Proxy); err != nil || u.Host == "" {
+				add("%s.proxy : \"none\" ou URL de proxy attendue, %q reçu", where, prof.Proxy)
+			}
+		}
+		checkCIDRs(where+".deny_cidrs", prof.DenyCIDRs)
+		checkCIDRs(where+".allow_cidrs", prof.AllowCIDRs)
+	}
+	profileExists := func(name string) bool {
+		_, ok := c.HTTP.Profiles[name]
+		return name == "" || name == DefaultProfile || ok
 	}
 
 	notifiers := map[string]bool{}
@@ -71,6 +93,49 @@ func validate(c *Config) []string {
 			add("%s : min_level %q inconnu (valeurs possibles : %s)", where, n.MinLevel, strings.Join(levels, ", "))
 		}
 	}
+	groups := map[string]bool{}
+	for i, g := range c.Groups {
+		where := fmt.Sprintf("groups[%d] (%s)", i, g.ID)
+		switch {
+		case !idPattern.MatchString(g.ID):
+			add("groups[%d] : id absent ou invalide (minuscules, chiffres et tirets)", i)
+		case groups[g.ID]:
+			add("%s : id de groupe en double", where)
+		}
+		groups[g.ID] = true
+		if g.Name == "" {
+			add("%s : champ name obligatoire", where)
+		}
+		for _, name := range g.Notify {
+			if !notifiers[name] {
+				add("%s : notifier %q non déclaré dans notifiers", where, name)
+			}
+		}
+		for _, tag := range g.Tags {
+			if !tagPattern.MatchString(tag) {
+				add("%s : tag %q invalide (minuscules, chiffres, - _ . :)", where, tag)
+			}
+		}
+		if !profileExists(g.Network) {
+			add("%s : profil réseau %q non déclaré dans http.profiles", where, g.Network)
+		}
+		if g.Auth != nil {
+			for _, msg := range validateAuth(g.Auth) {
+				add("%s : auth : %s", where, msg)
+			}
+		}
+	}
+	for i, n := range c.Notifiers {
+		if n.Subscribe == nil {
+			continue
+		}
+		for _, g := range n.Subscribe.Groups {
+			if !groups[g] {
+				add("notifiers[%d] (%s) : subscribe.groups : groupe %q inconnu", i, n.Name, g)
+			}
+		}
+	}
+
 	for _, name := range c.Defaults.Notify {
 		if !notifiers[name] {
 			add("defaults.notify : notifier %q non déclaré dans notifiers", name)
@@ -95,6 +160,17 @@ func validate(c *Config) []string {
 		if a.Name == "" {
 			add("%s : champ name obligatoire", where)
 		}
+		if a.Group != "" && !groups[a.Group] {
+			add("%s : groupe %q non déclaré dans groups", where, a.Group)
+		}
+		for _, tag := range a.Tags {
+			if !tagPattern.MatchString(tag) {
+				add("%s : tag %q invalide (minuscules, chiffres, - _ . :)", where, tag)
+			}
+		}
+		if !profileExists(a.Network) {
+			add("%s : profil réseau %q non déclaré dans http.profiles", where, a.Network)
+		}
 		if !isHTTPURL(a.Source.URL) {
 			add("%s : source.url absente ou invalide (http/https attendu)", where)
 		}
@@ -116,7 +192,7 @@ func validate(c *Config) []string {
 				add("%s : ignore %q : %v", where, ig, err)
 			}
 		}
-		if a.Auth != nil {
+		if g, _ := c.Group(a.Group); a.Auth != nil && (g == nil || a.Auth != g.Auth) { // inherited auth is reported once, on the group
 			for _, msg := range validateAuth(a.Auth) {
 				add("%s : auth : %s", where, msg)
 			}

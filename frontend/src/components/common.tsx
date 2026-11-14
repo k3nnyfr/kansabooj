@@ -7,6 +7,21 @@ export function StatusBadge({ status }: { status: ApiStatus }) {
   return <span className={`badge status-${status}`}>{t(`status.${status}`)}</span>
 }
 
+export function TagList({ tags, onClick }: { tags: string[]; onClick?: (tag: string) => void }) {
+  if (!tags.length) return null
+  return (
+    <span className="tags">
+      {tags.map((x) =>
+        onClick ? (
+          <button key={x} className="tag" onClick={() => onClick(x)}>#{x}</button>
+        ) : (
+          <span key={x} className="tag">#{x}</span>
+        ),
+      )}
+    </span>
+  )
+}
+
 export function LevelBadge({ level }: { level: Level }) {
   const { t } = useI18n()
   return <span className={`badge level-${level}`}>{t(`level.${level}`)}</span>

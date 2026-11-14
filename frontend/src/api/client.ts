@@ -7,6 +7,9 @@ export interface ApiRow {
   id: string
   name: string
   owner?: string
+  group?: string
+  tags: string[]
+  network: string
   source_url: string
   source_type: string
   enabled: boolean
@@ -89,15 +92,26 @@ export interface CheckResult {
   change_id?: number
 }
 
+export interface Group {
+  id: string
+  name: string
+  description?: string
+  owner?: string
+  tags?: string[]
+  network?: string
+}
+
 export interface Meta {
   version: string
   language: 'fr' | 'en'
   languages: string[]
   user: string
+  groups: Group[]
+  tags: string[]
 }
 
 export interface ServiceStatus {
-  scheduler: { last_tick: string; config_loaded_at: string; running: string[]; next_checks: Record<string, string> }
+  scheduler: { instance: string; leader: boolean; last_tick: string; config_loaded_at: string; running: string[]; next_checks: Record<string, string> }
   failing: ApiRow[]
   total: number
 }

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/name: kansabooj
+      app.kubernetes.io/part-of: kansabooj
+    includeSelectors: true
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+configMapGenerator:
+  - name: kansabooj-config
+    files:
+      - apis.yml
+generatorOptions:
+  # Nom stable : Kansabooj détecte lui-même la mise à jour du ConfigMap monté et se recharge
+  # à chaud (--watch-config), sans redémarrage des pods.
+  disableNameSuffixHash: true
+images:
+  - name: kansabooj
+    newName: registry.example/kansabooj
+    newTag: latest

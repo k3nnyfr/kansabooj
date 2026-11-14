@@ -1,0 +1,27 @@
+# Essai local avec PostgreSQL : podman-compose -f deploy/compose.yaml up --build
+# (ou docker compose). Interface sur http://localhost:8080
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: kansabooj
+      POSTGRES_PASSWORD: kansabooj
+      POSTGRES_DB: kansabooj
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kansabooj"]
+      interval: 2s
+      retries: 20
+    volumes: [db:/var/lib/postgresql/data]
+  kansabooj:
+    build: { context: .., dockerfile: Containerfile }
+    image: localhost/kansabooj:dev
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      KANSABOOJ_DB: postgres://kansabooj:kansabooj@db:5432/kansabooj?sslmode=disable
+    ports: ["8080:8080"]
+    read_only: true
+    volumes:
+      - ../config/apis.demo.yml:/etc/kansabooj/apis.yml:ro,Z
+volumes:
+  db: {}

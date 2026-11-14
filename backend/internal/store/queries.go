@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -15,6 +16,9 @@ type APIRow struct {
 	ID                string     `json:"id"`
 	Name              string     `json:"name"`
 	Owner             string     `json:"owner,omitempty"`
+	Group             string     `json:"group,omitempty"`
+	Tags              []string   `json:"tags"`
+	Network           string     `json:"network"`
 	SourceURL         string     `json:"source_url"`
 	SourceType        string     `json:"source_type"`
 	Enabled           bool       `json:"enabled"`
@@ -37,7 +41,7 @@ type APIRow struct {
 }
 
 const apiSelect = `
-SELECT a.id, a.name, COALESCE(a.owner,''), a.source_url, a.source_type, a.enabled, a.status, COALESCE(a.last_error,''),
+SELECT a.id, a.name, COALESCE(a.owner,''), COALESCE(a.group_id,''), a.tags, a.network_profile, a.source_url, a.source_type, a.enabled, a.status, COALESCE(a.last_error,''),
   COALESCE((SELECT c.error_kind FROM checks c WHERE c.api_id = a.id ORDER BY c.started_at DESC, c.id DESC LIMIT 1), ''),
   a.consecutive_errors, a.last_checked_at, a.next_check_at,
   COALESCE(s.info_version,''), COALESCE(s.spec_format,''), COALESCE(s.title,''), COALESCE(s.operation_count,0), a.current_snapshot_id,
@@ -45,7 +49,7 @@ SELECT a.id, a.name, COALESCE(a.owner,''), a.source_url, a.source_type, a.enable
   (SELECT COUNT(*) FROM changes ch WHERE ch.api_id = a.id),
   (SELECT COUNT(*) FROM changes ch WHERE ch.api_id = a.id AND ch.acknowledged_at IS NULL AND ch.from_snapshot_id IS NOT NULL),
   (SELECT COUNT(*) FROM changes ch WHERE ch.api_id = a.id AND ch.acknowledged_at IS NULL AND ch.from_snapshot_id IS NOT NULL
-     AND EXISTS (SELECT 1 FROM change_items i WHERE i.change_id = ch.id AND i.level = 'error' AND i.in_scope = 1)),
+     AND EXISTS (SELECT 1 FROM change_items i WHERE i.change_id = ch.id AND i.level = 'error' AND i.in_scope = TRUE)),
   a.config_json
 FROM apis a LEFT JOIN snapshots s ON s.id = a.current_snapshot_id`
 
@@ -53,13 +57,16 @@ func scanAPI(sc interface{ Scan(...any) error }) (*APIRow, error) {
 	var r APIRow
 	var last, next, lastChange sql.NullString
 	var snap sql.NullInt64
-	err := sc.Scan(&r.ID, &r.Name, &r.Owner, &r.SourceURL, &r.SourceType, &r.Enabled, &r.Status, &r.LastError, &r.LastErrorKind,
+	var tags string
+	err := sc.Scan(&r.ID, &r.Name, &r.Owner, &r.Group, &tags, &r.Network, &r.SourceURL, &r.SourceType, &r.Enabled, &r.Status, &r.LastError, &r.LastErrorKind,
 		&r.ConsecutiveErrors, &last, &next, &r.Version, &r.Format, &r.Title, &r.OperationCount, &snap,
 		&lastChange, &r.ChangeCount, &r.Unacknowledged, &r.UnackedBreaking, &r.ConfigJSON)
 	if err != nil {
 		return nil, err
 	}
 	r.LastCheckedAt, r.NextCheckAt, r.LastChangeAt = parseTime(last), parseTime(next), parseTime(lastChange)
+	r.Tags = []string{}
+	json.Unmarshal([]byte(tags), &r.Tags)
 	if snap.Valid {
 		r.SnapshotID = &snap.Int64
 	}
@@ -70,9 +77,9 @@ func scanAPI(sc interface{ Scan(...any) error }) (*APIRow, error) {
 func (s *Store) ListAPIs(ctx context.Context, includeDisabled bool) ([]APIRow, error) {
 	q := apiSelect
 	if !includeDisabled {
-		q += ` WHERE a.enabled = 1`
+		q += ` WHERE a.enabled = TRUE`
 	}
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY a.name COLLATE NOCASE`)
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY lower(a.name), a.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +124,7 @@ type TimelineEntry struct {
 const changeSelect = `
 SELECT ch.id, ch.detected_at, ch.from_snapshot_id, ch.to_snapshot_id, COALESCE(ch.version_from,''), COALESCE(ch.version_to,''),
   ch.error_count, ch.warn_count, ch.info_count, ch.in_scope_count,
-  (SELECT COUNT(*) FROM change_items i WHERE i.change_id = ch.id AND i.level = 'error' AND i.in_scope = 1),
+  (SELECT COUNT(*) FROM change_items i WHERE i.change_id = ch.id AND i.level = 'error' AND i.in_scope = TRUE),
   ch.acknowledged_at, COALESCE(ch.acknowledged_by,'')
 FROM changes ch`
 
@@ -286,7 +293,7 @@ FROM checks WHERE api_id = ? ORDER BY started_at DESC, id DESC LIMIT ?`, apiID, 
 
 // NextChecks returns the persisted schedule.
 func (s *Store) NextChecks(ctx context.Context) (map[string]time.Time, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, next_check_at FROM apis WHERE enabled = 1 AND next_check_at IS NOT NULL`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, next_check_at FROM apis WHERE enabled = TRUE AND next_check_at IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -334,16 +341,12 @@ type Notification struct {
 // CreateNotification stores a pending notification. A change is notified at most
 // once per notifier: a duplicate returns created=false.
 func (s *Store) CreateNotification(ctx context.Context, n *Notification) (created bool, err error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO notifications (change_id, api_id, notifier, kind, status, payload, content_type, next_attempt_at)
-VALUES (?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT DO NOTHING`, n.ChangeID, n.APIID, n.Notifier, n.Kind, string(n.Payload), n.ContentType, now())
-	if err != nil {
-		return false, err
-	}
-	if c, _ := res.RowsAffected(); c == 0 {
+	err = s.db.QueryRowContext(ctx, `INSERT INTO notifications (change_id, api_id, notifier, kind, status, payload, content_type, next_attempt_at)
+VALUES (?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`, n.ChangeID, n.APIID, n.Notifier, n.Kind, string(n.Payload), n.ContentType, now()).Scan(&n.ID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	n.ID, err = res.LastInsertId()
-	return true, err
+	return err == nil, err
 }
 
 // MarkNotification records the result of a delivery attempt. next == nil with

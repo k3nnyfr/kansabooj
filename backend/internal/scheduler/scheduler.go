@@ -4,10 +4,14 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/url"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -31,6 +35,7 @@ type Scheduler struct {
 	disp  *notify.Dispatcher
 	sem   chan struct{}
 	tick  time.Duration
+	retry time.Duration // leader election retry
 
 	mu        sync.Mutex
 	cfg       *config.Config
@@ -40,12 +45,21 @@ type Scheduler struct {
 	hostLocks map[string]*sync.Mutex
 	lastTick  time.Time
 	loadedAt  time.Time
+	leader    bool
+	instance  string
 }
+
+const (
+	leaderLock     = "kansabooj:scheduler"
+	leaderRetry    = 15 * time.Second
+	leaderHeartbit = 10 * time.Second
+)
 
 func New(path string, cfg *config.Config, st *store.Store, log *slog.Logger) (*Scheduler, error) {
 	s := &Scheduler{path: path, store: st, log: log, cfg: cfg, mon: monitor.New(cfg, st),
-		sem: make(chan struct{}, cfg.Server.Concurrency), tick: 10 * time.Second,
+		sem: make(chan struct{}, cfg.Server.Concurrency), tick: 10 * time.Second, retry: leaderRetry,
 		next: map[string]time.Time{}, running: map[string]bool{}, hostLocks: map[string]*sync.Mutex{}, loadedAt: time.Now()}
+	s.instance, _ = os.Hostname()
 	d, err := notify.NewDispatcher(st, s.Config, log)
 	if err != nil {
 		return nil, err
@@ -61,14 +75,67 @@ func (s *Scheduler) Config() *config.Config {
 	return s.cfg
 }
 
-// Run schedules checks until ctx is cancelled.
+// Run schedules checks until ctx is cancelled. With several replicas (PostgreSQL),
+// only the instance holding the leader lock schedules checks, retries notifications
+// and purges logs; the others serve the UI/API and run manual checks.
 func (s *Scheduler) Run(ctx context.Context) error {
+	for {
+		lock, ok, err := s.store.TryLock(ctx, leaderLock)
+		if err != nil {
+			s.log.Error("élection du leader", "err", err)
+		}
+		if ok {
+			s.setLeader(true)
+			s.log.Info("instance leader : planification active", "instance", s.instance)
+			err = s.lead(ctx, lock)
+			lock.Release()
+			s.setLeader(false)
+			if ctx.Err() != nil {
+				return nil
+			}
+			s.log.Warn("leadership perdue", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(s.retry):
+		}
+	}
+}
+
+func (s *Scheduler) setLeader(v bool) {
+	s.mu.Lock()
+	s.leader = v
+	s.mu.Unlock()
+}
+
+// lead runs the scheduling loop while the leader lock is held.
+func (s *Scheduler) lead(parent context.Context, lock *store.Lock) error {
+	ctx, cancel := context.WithCancelCause(parent)
+	defer cancel(nil)
+	go func() { // lose leadership as soon as the session holding the lock is gone
+		t := time.NewTicker(leaderHeartbit)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := lock.Alive(ctx); err != nil {
+					cancel(err)
+					return
+				}
+			}
+		}
+	}()
+
 	persisted, err := s.store.NextChecks(ctx)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	now := time.Now()
+	s.next = map[string]time.Time{}
 	for _, a := range s.cfg.APIs {
 		if t, ok := persisted[a.ID]; ok && t.After(now) {
 			s.next[a.ID] = t
@@ -89,7 +156,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
-			return nil
+			return context.Cause(ctx)
 		case <-t.C:
 		}
 	}
@@ -159,7 +226,20 @@ func (s *Scheduler) run(ctx context.Context, apiID, trigger string) (*monitor.Ou
 	hl.Lock()
 	defer hl.Unlock()
 
+	// Across replicas: never two checks of the same API at once.
+	lock, ok, err := s.store.TryLock(ctx, "kansabooj:api:"+apiID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrBusy
+	}
+	defer lock.Release()
+
 	o, err := mon.Check(ctx, apiID, trigger, false)
+	if errors.Is(err, store.ErrConcurrentUpdate) {
+		return nil, ErrBusy
+	}
 
 	s.mu.Lock()
 	next := time.Now().Add(api.Interval.Std() + s.jitter())
@@ -216,8 +296,48 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 	return nil
 }
 
+// WatchConfig reloads the configuration when the YAML file or a referenced secret
+// file changes (Kubernetes updates mounted ConfigMaps/Secrets in place). Polling is
+// used on purpose: it survives the symlink swaps done by the kubelet.
+func (s *Scheduler) WatchConfig(ctx context.Context, every time.Duration) {
+	last := fingerprint(s.Config().Files)
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		fp := fingerprint(s.Config().Files)
+		if fp == last {
+			continue
+		}
+		s.log.Info("modification de configuration détectée, rechargement")
+		if err := s.Reload(ctx); err != nil {
+			s.log.Error("rechargement refusé, configuration précédente conservée", "err", err)
+		}
+		last = fp // do not retry an invalid config every tick; the next edit triggers a new attempt
+	}
+}
+
+func fingerprint(files []string) string {
+	h := sha256.New()
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Fprintf(h, "%s:missing;", f)
+			continue
+		}
+		fmt.Fprintf(h, "%s:%x;", f, sha256.Sum256(b))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // Status describes the scheduler for the status page.
 type Status struct {
+	Instance   string               `json:"instance"`
+	Leader     bool                 `json:"leader"`
 	LastTick   time.Time            `json:"last_tick"`
 	ConfigAt   time.Time            `json:"config_loaded_at"`
 	Running    []string             `json:"running"`
@@ -227,7 +347,7 @@ type Status struct {
 func (s *Scheduler) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{LastTick: s.lastTick, ConfigAt: s.loadedAt, Running: []string{}, NextChecks: map[string]time.Time{}}
+	st := Status{Instance: s.instance, Leader: s.leader, LastTick: s.lastTick, ConfigAt: s.loadedAt, Running: []string{}, NextChecks: map[string]time.Time{}}
 	for id := range s.running {
 		st.Running = append(st.Running, id)
 	}

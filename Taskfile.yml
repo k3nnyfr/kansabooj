@@ -82,6 +82,26 @@ tasks:
     dir: backend
     cmds: [go test -race ./...]
 
+  test:pg:
+    desc: "Tests backend sur PostgreSQL — ex : task test:pg PG=postgres://user:pass@localhost:5432/postgres?sslmode=disable"
+    dir: backend
+    requires: { vars: [PG] }
+    env: { KANSABOOJ_TEST_POSTGRES: '{{.PG}}' }
+    cmds: [go test -race -count=1 ./...]
+
+  image:
+    desc: Construit l'image de conteneur (podman, sinon docker)
+    vars:
+      ENGINE: { sh: 'command -v podman >/dev/null && echo podman || echo docker' }
+      IMAGE: '{{.IMAGE | default "localhost/kansabooj:dev"}}'
+    cmds:
+      - '{{.ENGINE}} build -f Containerfile --build-arg VERSION={{.VERSION}} -t {{.IMAGE}} .'
+
+  deploy:render:
+    desc: "Affiche les manifests générés — ex : task deploy:render TARGET=openshift (ou kubernetes)"
+    vars: { TARGET: '{{.TARGET | default "kubernetes"}}' }
+    cmds: ['kubectl kustomize deploy/kubernetes/overlays/{{.TARGET}}']
+
   lint:
     desc: gofmt, go vet et typecheck du front
     cmds:

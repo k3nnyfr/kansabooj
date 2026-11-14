@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,11 +46,52 @@ func (d Duration) String() string {
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
 type Config struct {
+	// Files lists the files the configuration was built from (the YAML itself and
+	// every ${file:...} secret), so they can be watched for changes.
+	Files []string `yaml:"-"`
+
 	Server    Server     `yaml:"server"`
 	Defaults  Defaults   `yaml:"defaults"`
 	HTTP      HTTP       `yaml:"http"`
 	Notifiers []Notifier `yaml:"notifiers"`
+	Groups    []Group    `yaml:"groups"`
 	APIs      []API      `yaml:"apis"`
+}
+
+// Group gathers APIs (a partner, a domain, internal vs external…) and carries
+// default values inherited by its APIs. API values win over group values, which
+// win over `defaults`.
+type Group struct {
+	ID          string    `yaml:"id" json:"id"`
+	Name        string    `yaml:"name" json:"name"`
+	Description string    `yaml:"description" json:"description,omitempty"`
+	Owner       string    `yaml:"owner" json:"owner,omitempty"`
+	Tags        []string  `yaml:"tags" json:"tags,omitempty"`
+	Interval    *Duration `yaml:"interval" json:"-"`
+	Timeout     *Duration `yaml:"timeout" json:"-"`
+	Notify      []string  `yaml:"notify" json:"-"`
+	Ignore      []string  `yaml:"ignore" json:"-"`
+	Auth        *Auth     `yaml:"auth" json:"-"`
+	Network     string    `yaml:"network" json:"network,omitempty"`
+}
+
+// NetworkProfile overrides the outbound HTTP settings for the APIs using it, e.g.
+// internal APIs reached without the corporate proxy.
+type NetworkProfile struct {
+	Proxy      string   `yaml:"proxy"`       // "" = inherit http.proxy, "none" = direct connection, or a URL
+	CABundle   string   `yaml:"ca_bundle"`   // "" = inherit http.ca_bundle
+	DenyCIDRs  []string `yaml:"deny_cidrs"`  // absent = inherit http.deny_cidrs, [] = none
+	AllowCIDRs []string `yaml:"allow_cidrs"` // non-empty = targets must be inside these ranges
+}
+
+// DefaultProfile is the implicit profile made of the top-level http settings.
+const DefaultProfile = "default"
+
+// Subscription routes the notifications of matching APIs to a notifier, in
+// addition to the notifiers listed by the APIs themselves.
+type Subscription struct {
+	Groups []string `yaml:"groups"`
+	Tags   []string `yaml:"tags"`
 }
 
 // Server holds the settings of the `serve` command.
@@ -71,27 +114,71 @@ type Defaults struct {
 }
 
 type HTTP struct {
-	Proxy        string   `yaml:"proxy"`
-	CABundle     string   `yaml:"ca_bundle"`
-	UserAgent    string   `yaml:"user_agent"`
-	DenyCIDRs    []string `yaml:"deny_cidrs"`
-	MaxBodyBytes int64    `yaml:"max_body_bytes"`
+	Proxy        string                    `yaml:"proxy"`
+	CABundle     string                    `yaml:"ca_bundle"`
+	UserAgent    string                    `yaml:"user_agent"`
+	DenyCIDRs    []string                  `yaml:"deny_cidrs"`
+	AllowCIDRs   []string                  `yaml:"allow_cidrs"`
+	MaxBodyBytes int64                     `yaml:"max_body_bytes"`
+	Profiles     map[string]NetworkProfile `yaml:"profiles"`
+}
+
+// ForProfile returns the effective HTTP settings for a network profile.
+func (h HTTP) ForProfile(name string) HTTP {
+	p, ok := h.Profiles[name]
+	if name == "" || name == DefaultProfile || !ok {
+		return h
+	}
+	out := h
+	if p.Proxy != "" {
+		out.Proxy = p.Proxy
+	}
+	if p.CABundle != "" {
+		out.CABundle = p.CABundle
+	}
+	if p.DenyCIDRs != nil {
+		out.DenyCIDRs = p.DenyCIDRs
+	}
+	if p.AllowCIDRs != nil {
+		out.AllowCIDRs = p.AllowCIDRs
+	}
+	return out
 }
 
 type Notifier struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	URL         string `yaml:"url"`
-	Secret      string `yaml:"secret"`
-	MinLevel    string `yaml:"min_level"`
-	OnlyInScope *bool  `yaml:"only_in_scope"`
-	Language    string `yaml:"language"` // fr | en, defaults to server.language
+	Name        string        `yaml:"name"`
+	Type        string        `yaml:"type"`
+	URL         string        `yaml:"url"`
+	Secret      string        `yaml:"secret"`
+	MinLevel    string        `yaml:"min_level"`
+	OnlyInScope *bool         `yaml:"only_in_scope"`
+	Language    string        `yaml:"language"` // fr | en, defaults to server.language
+	Subscribe   *Subscription `yaml:"subscribe"`
+}
+
+// Subscribed reports whether the notifier subscribed to the API's group or tags.
+func (n *Notifier) Subscribed(a *API) bool {
+	if n.Subscribe == nil {
+		return false
+	}
+	if a.Group != "" && slices.Contains(n.Subscribe.Groups, a.Group) {
+		return true
+	}
+	for _, t := range a.Tags {
+		if slices.Contains(n.Subscribe.Tags, t) {
+			return true
+		}
+	}
+	return false
 }
 
 type API struct {
 	ID       string    `yaml:"id" json:"id"`
 	Name     string    `yaml:"name" json:"name"`
 	Owner    string    `yaml:"owner" json:"owner,omitempty"`
+	Group    string    `yaml:"group" json:"group,omitempty"`
+	Tags     []string  `yaml:"tags" json:"tags,omitempty"`
+	Network  string    `yaml:"network" json:"network,omitempty"` // network profile, default "default"
 	Source   Source    `yaml:"source" json:"source"`
 	Auth     *Auth     `yaml:"auth" json:"-"` // never serialized: contains secrets
 	Interval *Duration `yaml:"interval" json:"interval,omitempty"`
@@ -199,23 +286,42 @@ func applyDefaults(c *Config) {
 			n.OnlyInScope = &t
 		}
 	}
+	groups := map[string]*Group{}
+	for i := range c.Groups {
+		groups[c.Groups[i].ID] = &c.Groups[i]
+	}
 	for i := range c.APIs {
 		a := &c.APIs[i]
+		g := groups[a.Group]
+		if g == nil {
+			g = &Group{}
+		}
 		if a.Source.Type == "" {
 			a.Source.Type = SourceAuto
 		}
-		if a.Interval == nil {
-			v := d.Interval
-			a.Interval = &v
+		if a.Owner == "" {
+			a.Owner = g.Owner
 		}
-		if a.Timeout == nil {
-			v := d.Timeout
-			a.Timeout = &v
-		}
-		if a.Notify == nil {
+		a.Interval = firstDuration(a.Interval, g.Interval, d.Interval)
+		a.Timeout = firstDuration(a.Timeout, g.Timeout, d.Timeout)
+		switch {
+		case a.Notify != nil:
+		case g.Notify != nil:
+			a.Notify = g.Notify
+		default:
 			a.Notify = d.Notify
 		}
-		a.Ignore = append(append([]string{}, d.Ignore...), a.Ignore...)
+		if a.Auth == nil {
+			a.Auth = g.Auth
+		}
+		if a.Network == "" {
+			a.Network = g.Network
+		}
+		if a.Network == "" {
+			a.Network = DefaultProfile
+		}
+		a.Ignore = append(append(append([]string{}, d.Ignore...), g.Ignore...), a.Ignore...)
+		a.Tags = mergeTags(g.Tags, a.Tags)
 	}
 }
 
@@ -226,28 +332,73 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lecture de la configuration : %w", err)
 	}
-	return Parse(raw)
+	c, err := parse(raw)
+	if c != nil {
+		c.Files = append([]string{path}, c.Files...)
+	}
+	return c, err
 }
 
 // Parse is Load without the file read.
-func Parse(raw []byte) (*Config, error) {
+func Parse(raw []byte) (*Config, error) { return parse(raw) }
+
+func parse(raw []byte) (*Config, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(raw, &root); err != nil {
 		return nil, fmt.Errorf("YAML invalide : %w", err)
 	}
 	problems := unknownFields(raw)
-	expandNode(&root, &problems)
+	var files []string
+	expandNode(&root, &problems, &files)
 
 	var c Config
 	if err := root.Decode(&c); err != nil {
 		return nil, fmt.Errorf("structure de configuration invalide : %w", err)
 	}
+	c.Files = files
 	applyDefaults(&c)
 	problems = append(problems, validate(&c)...)
 	if len(problems) > 0 {
 		return &c, &ValidationError{Problems: problems}
 	}
 	return &c, nil
+}
+
+func firstDuration(v ...any) *Duration {
+	for _, x := range v {
+		switch d := x.(type) {
+		case *Duration:
+			if d != nil {
+				return d
+			}
+		case Duration:
+			return &d
+		}
+	}
+	return nil
+}
+
+func mergeTags(lists ...[]string) []string {
+	var out []string
+	for _, l := range lists {
+		for _, t := range l {
+			if !slices.Contains(out, t) {
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Group returns the group with the given id.
+func (c *Config) Group(id string) (*Group, bool) {
+	for i := range c.Groups {
+		if c.Groups[i].ID == id {
+			return &c.Groups[i], true
+		}
+	}
+	return nil, false
 }
 
 // unknownFields reports misspelled or unsupported keys, which yaml would otherwise silently ignore.

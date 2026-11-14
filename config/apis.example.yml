@@ -24,8 +24,19 @@ http:
   ca_bundle: /etc/ssl/certs/corp-ca.pem
   user_agent: "kansabooj/1.0 (+contact: equipe-api-gateway)"
   deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
+  profiles:
+    internal:                 # APIs internes : sans proxy, uniquement vers le réseau interne
+      proxy: none
+      ca_bundle: /etc/ssl/certs/corp-ca.pem
+      deny_cidrs: [169.254.0.0/16]          # jamais les métadonnées cloud
+      allow_cidrs: [10.0.0.0/8, 172.16.0.0/12]
 
 notifiers:
+  - name: securite-gchat
+    type: googlechat
+    url: ${GCHAT_WEBHOOK_SECURITE}
+    min_level: error
+    subscribe: { tags: [pci] }              # tous les changements cassants des APIs taguées pci
   - name: api-team-gchat
     type: googlechat        # googlechat | slack | teams | generic
     url: ${GCHAT_WEBHOOK_API_TEAM}
@@ -43,14 +54,29 @@ notifiers:
     min_level: info
     only_in_scope: false
 
+groups:
+  - id: paiement
+    name: Partenaires paiement
+    description: PSP et acquéreurs réexposés dans la Gateway
+    owner: equipe-paiement
+    tags: [pci, externe]
+    interval: 1h
+  - id: interne
+    name: APIs internes
+    description: Contrats des équipes internes consommés via la Gateway
+    network: internal                       # profil réseau ci-dessus
+    interval: 15m
+    tags: [interne]
+    notify: [api-team-gchat]
+
 apis:
   - id: worldline-direct                 # exemple réel : spec publique, ETag supporté (checks inchangés = 304)
     name: Worldline Direct (préprod)
-    owner: equipe-paiement
+    group: paiement                         # hérite owner, interval, tags du groupe
+    tags: [psp]
     source:
       url: https://payment.direct.ecom.preprod.worldline-solutions.com/v1/public-contract-definition.yaml
       type: openapi
-    interval: 1h
     gateway:
       exposed_operations:
         - POST /v2/{merchantId}/payments
@@ -114,3 +140,10 @@ apis:
       url: https://partner-y.example/api-documentation.html
       type: html                         # mode dégradé : détection de changement de texte, pas de diff sémantique
     interval: 24h
+
+  - id: referentiel-clients
+    name: Référentiel clients (interne)
+    group: interne
+    source:
+      url: https://referentiel-clients.interne.example/v3/api-docs
+      type: openapi

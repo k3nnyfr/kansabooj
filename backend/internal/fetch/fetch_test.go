@@ -137,3 +137,35 @@ func TestDenyCIDRs(t *testing.T) {
 		t.Fatalf("expected denied error for localhost, got %v", err)
 	}
 }
+
+func TestInternalProfileAllowList(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("{}")) }))
+	defer s.Close()
+	h := config.HTTP{UserAgent: "t", MaxBodyBytes: 1024, Proxy: "http://proxy.invalid:3128", DenyCIDRs: []string{"127.0.0.0/8"},
+		Profiles: map[string]config.NetworkProfile{
+			"internal": {Proxy: "none", DenyCIDRs: []string{}, AllowCIDRs: []string{"127.0.0.0/8"}},
+			"strict":   {Proxy: "none", DenyCIDRs: []string{}, AllowCIDRs: []string{"10.0.0.0/8"}},
+		}}
+	a := api(s.URL, nil)
+
+	a.Network = "internal" // direct, loopback explicitly allowed
+	c, err := New(h, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Get(context.Background(), Request{URL: s.URL}); err != nil {
+		t.Fatalf("internal profile should reach the internal target: %v", err)
+	}
+
+	a.Network = "strict" // direct, but target outside the allow-list
+	c, _ = New(h, a)
+	if _, err := c.Get(context.Background(), Request{URL: s.URL}); err == nil || err.(*Error).Kind != KindDenied {
+		t.Fatalf("expected denied, got %v", err)
+	}
+
+	a.Network = "" // default profile: loopback denied
+	c, _ = New(h, a)
+	if _, err := c.Get(context.Background(), Request{URL: s.URL}); err == nil || err.(*Error).Kind != KindDenied {
+		t.Fatalf("expected denied, got %v", err)
+	}
+}

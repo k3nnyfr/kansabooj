@@ -1,21 +1,19 @@
-package store
+package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"git.k3nny.fr/kansabooj/internal/config"
 	"git.k3nny.fr/kansabooj/internal/diff"
+	"git.k3nny.fr/kansabooj/internal/store"
+	"git.k3nny.fr/kansabooj/internal/store/storetest"
 )
 
 func TestQueries(t *testing.T) {
 	ctx := context.Background()
-	st, err := Open(ctx, filepath.Join(t.TempDir(), "k.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := storetest.Open(t)
 	defer st.Close()
 	apis := []config.API{{ID: "a", Name: "A", Source: config.Source{URL: "https://a.example", Type: "openapi"}}}
 	if err := st.SyncAPIs(ctx, apis); err != nil {
@@ -23,10 +21,10 @@ func TestQueries(t *testing.T) {
 	}
 	at := time.Now().UTC().Truncate(time.Second)
 	save := func(body string, prev *int64, sm *diff.Summary) int64 {
-		id, err := st.SaveNewVersion(ctx, NewVersion{
-			Check: CheckRecord{APIID: "a", StartedAt: at, Trigger: "manual", Status: "changed"},
+		id, err := st.SaveNewVersion(ctx, store.NewVersion{
+			Check: store.CheckRecord{APIID: "a", StartedAt: at, Trigger: "manual", Status: "changed"},
 			Raw:   []byte(body), RawMedia: "application/json", Normalized: []byte(body),
-			Snapshot: Snapshot{Format: "openapi-3.0", Version: body}, PrevSnapID: prev, Summary: sm, Semantic: true,
+			Snapshot: store.Snapshot{Format: "openapi-3.0", Version: body}, PrevSnapID: prev, Summary: sm, Semantic: true,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -70,7 +68,7 @@ func TestQueries(t *testing.T) {
 		t.Errorf("spec = %q, %v", body, err)
 	}
 
-	n := &Notification{ChangeID: &second, APIID: "a", Notifier: "chat", Kind: "change", Payload: []byte("{}")}
+	n := &store.Notification{ChangeID: &second, APIID: "a", Notifier: "chat", Kind: "change", Payload: []byte("{}")}
 	if ok, err := st.CreateNotification(ctx, n); !ok || err != nil {
 		t.Fatal(ok, err)
 	}

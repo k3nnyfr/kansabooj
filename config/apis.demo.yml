@@ -8,10 +8,18 @@ http:
   user_agent: "kansabooj/0.1 (demo)"
   deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
 
+groups:
+  - id: paiement
+    name: Partenaires paiement
+    description: PSP réexposés dans la Gateway
+    owner: equipe-paiement
+    tags: [pci, externe]
+
 apis:
   - id: worldline-direct
     name: Worldline Direct (préprod)
-    owner: equipe-paiement
+    group: paiement
+    tags: [psp]
     source:
       url: https://payment.direct.ecom.preprod.worldline-solutions.com/v1/public-contract-definition.yaml
       type: openapi
@@ -24,6 +32,7 @@ apis:
   - id: petstore
     name: Swagger Petstore
     owner: equipe-demo
+    tags: [demo]
     source:
       url: https://petstore3.swagger.io/api/v3/openapi.json
       type: openapi

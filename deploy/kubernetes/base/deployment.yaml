@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kansabooj
+spec:
+  # Plusieurs réplicas possibles avec PostgreSQL : une seule instance (leader, verrou
+  # consultatif PostgreSQL) planifie les checks ; toutes servent l'interface et l'API.
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    spec:
+      serviceAccountName: kansabooj
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true          # pas de runAsUser : OpenShift attribue un UID arbitraire
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: kansabooj }
+      containers:
+        - name: kansabooj
+          image: kansabooj
+          args: [serve]
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - name: KANSABOOJ_DB            # URL PostgreSQL (ex. clé "uri" du Secret généré par CloudNativePG)
+              valueFrom:
+                secretKeyRef: { name: kansabooj-db-app, key: uri }
+            - { name: KANSABOOJ_CONFIG, value: /etc/kansabooj/apis.yml }
+          envFrom:
+            - secretRef:                    # webhooks, clés d'API partenaires… référencés en ${VAR} dans apis.yml
+                name: kansabooj-secrets
+                optional: true
+          volumeMounts:
+            - { name: config, mountPath: /etc/kansabooj, readOnly: true }
+            - { name: secret-files, mountPath: /run/secrets/kansabooj, readOnly: true }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }   # base de données joignable
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }  # processus vivant (ne dépend pas de la base)
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 512Mi }               # specs volumineuses (plusieurs Mo) : marge pour le diff
+      volumes:
+        - name: config
+          configMap: { name: kansabooj-config }
+        - name: secret-files                        # certificats mTLS, secrets OAuth2… pour ${file:...}
+          secret: { secretName: kansabooj-files, optional: true }

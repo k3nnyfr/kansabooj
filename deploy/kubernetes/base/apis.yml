@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://kansabooj.interne.example/apis.schema.json
+# Configuration montée dans /etc/kansabooj/apis.yml. Rechargée à chaud quand le ConfigMap change.
+# Secrets : variables d'environnement (Secret kansabooj-secrets) ou fichiers ${file:/run/secrets/kansabooj/...}.
+server:
+  base_url: https://kansabooj.example.com
+  language: fr
+
+defaults:
+  interval: 6h
+  ignore: [$.servers]
+
+http:
+  proxy: ${HTTPS_PROXY:-}
+  user_agent: "kansabooj (+equipe-api-gateway)"
+  deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
+
+apis:
+  - id: worldline-direct
+    name: Worldline Direct (préprod)
+    source:
+      url: https://payment.direct.ecom.preprod.worldline-solutions.com/v1/public-contract-definition.yaml
+      type: openapi
