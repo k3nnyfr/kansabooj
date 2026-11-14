@@ -167,8 +167,15 @@ jobs:
             "$TRIVY_IMAGE" image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress "$IMAGE:$VERSION"
       - name: push (main et tags)
         if: github.event_name == 'push'
+        env: # secrets passés par l'environnement, jamais interpolés dans le script
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
-          echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "$REGISTRY" -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
+            echo "::error::secrets REGISTRY_USER / REGISTRY_TOKEN absents (Paramètres du dépôt → Actions → Secrets ; jeton Gitea avec write:package)"
+            exit 1
+          fi
+          printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
           docker push "$IMAGE:$VERSION"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             docker tag "$IMAGE:$VERSION" "$IMAGE:latest" && docker push "$IMAGE:latest"
