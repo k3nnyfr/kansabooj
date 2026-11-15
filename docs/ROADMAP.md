@@ -86,6 +86,7 @@
 - [x] Normalisation : valeurs de `enum` et `required` triées (faux positifs quand le producteur les émet dans un ordre
       variable, ex. data.gouv.fr) ; `normalize.Upgrade` + `Store.Renormalize` : pas d'évolution fantôme sur l'existant
 - [x] `ignore:` accepte `$..clé` (toute profondeur), ex. `$..example`
+- [x] v0.10.1 : liens vers le dépôt principal (Gitea) et son miroir GitHub dans la barre du haut, logo dans le README
 
 ## Plus tard (selon retours)
 - Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)

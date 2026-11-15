@@ -1,5 +1,7 @@
 # Kansabooj
 
+<img src="docs/images/logo.svg" alt="Logo Kansabooj" width="96">
+
 ![version](https://img.shields.io/badge/version-v0.10-blue.svg)
 
 > **Dépôt principal : [git.k3nny.fr/k3nny/kansabooj](https://git.k3nny.fr/k3nny/kansabooj).**
