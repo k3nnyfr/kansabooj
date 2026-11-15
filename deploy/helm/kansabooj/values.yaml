@@ -1,0 +1,158 @@
+# Valeurs par défaut du chart Kansabooj. Exemples complets : deploy/helm/examples/ ; guide : docs/guides/helm.md.
+# Mêmes choix que les manifests kustomize (deploy/kubernetes) : conteneur sans état, racine en lecture seule,
+# pas de runAsUser (UID arbitraire OpenShift), configuration rechargée à chaud depuis le ConfigMap.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# --- Métadonnées supplémentaires -----------------------------------------------------------------------------
+# Ajoutées à toutes les ressources du chart (ex. équipe, centre de coût, étiquettes de supervision).
+commonLabels: {}
+commonAnnotations: {}
+
+image:
+  repository: git.k3nny.fr/k3nny/kansabooj
+  tag: ""                    # défaut : appVersion du chart
+  digest: ""                 # sha256:… — prioritaire sur le tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []         # [{ name: registre-entreprise }]
+
+# Plusieurs réplicas possibles avec PostgreSQL : une seule instance (leader) planifie les checks.
+replicaCount: 2
+revisionHistoryLimit: 3
+
+deployment:
+  labels: {}
+  annotations: {}
+
+podLabels: {}
+podAnnotations: {}           # ex. prometheus.io/scrape: "true", prometheus.io/port: "8080"
+
+serviceAccount:
+  create: true
+  name: ""                   # défaut : nom complet de la release
+  labels: {}
+  annotations: {}
+
+# --- Configuration (apis.yml) ----------------------------------------------------------------------------------
+# Le YAML reste la source de vérité. Soit le contenu est fourni ici (ConfigMap géré par le chart), soit un ConfigMap
+# existant est référencé (clé apis.yml), par exemple maintenu par un dépôt de configuration et GitOps.
+# Une modification est prise en compte à chaud (détection toutes les 30 s), sans redémarrage des pods.
+config:
+  existingConfigMap: ""
+  labels: {}
+  annotations: {}
+  apisYml: |
+    server:
+      base_url: https://kansabooj.example.com
+      language: fr
+    defaults:
+      interval: 6h
+      ignore: [$.servers]
+    http:
+      proxy: ${HTTPS_PROXY:-}
+      user_agent: "kansabooj (+equipe-api-gateway)"
+      deny_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, "::1/128", "fc00::/7"]
+    apis:
+      - id: petstore
+        name: Swagger Petstore
+        source:
+          url: https://petstore3.swagger.io/api/v3/openapi.json
+          type: openapi
+
+# Secrets référencés dans apis.yml : en variables (${VAR}) ou en fichiers (${file:/run/secrets/kansabooj/…}).
+# Le chart ne crée aucun Secret : ils sont fournis par l'exploitation (SealedSecrets, External Secrets, Vault…).
+secrets:
+  envFrom: kansabooj-secrets   # webhooks, clés d'API partenaires (optionnel ; "" pour ne pas le monter)
+  files: kansabooj-files       # certificats mTLS, secrets OAuth2 (optionnel ; "" pour ne pas le monter)
+
+# --- Base de données -------------------------------------------------------------------------------------------
+database:
+  # url      : URL PostgreSQL complète dans un Secret (ex. clé « uri » du Secret généré par CloudNativePG)
+  # config   : section database: de apis.yml (serveur tiers, guide docs/guides/postgresql-externe.md),
+  #            mot de passe du compte applicatif dans un Secret, CA du serveur optionnelle
+  mode: url
+  url:
+    secretName: kansabooj-db-app
+    key: uri
+  config:
+    passwordSecret:
+      name: kansabooj-db-credentials
+      key: password            # exposé en KANSABOOJ_DB_PASSWORD (database.password: ${KANSABOOJ_DB_PASSWORD})
+    caSecret: kansabooj-db-ca  # clé ca.pem, montée dans /etc/kansabooj-db (database.sslrootcert)
+  # Migration par le compte propriétaire avant chaque installation / mise à jour (hook Helm), quand le compte
+  # applicatif n'a pas les droits DDL (database.migrate: false). Mode « config » uniquement.
+  migrateJob:
+    enabled: false
+    ownerUrlSecret:
+      name: kansabooj-db-owner
+      key: uri
+    backoffLimit: 2
+    annotations: {}
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+
+extraEnv: []                 # [{ name: HTTPS_PROXY, value: http://proxy.interne:3128 }]
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+# --- Exposition ------------------------------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  labels: {}
+  annotations: {}
+
+# Ingress standard (networking.k8s.io/v1), aucun contrôleur imposé :
+#   - OpenShift : className « openshift-default » ; le contrôleur Ingress-to-route crée la Route correspondante
+#     (annotations route.openshift.io/* et haproxy.router.openshift.io/* reprises sur la Route) ;
+#   - Kubernetes : className du contrôleur HAProxy installé (ex. « haproxy »), annotations haproxy.org/*.
+# L'acquittement utilise l'identité posée par le proxy SSO (X-Forwarded-User par défaut, server.user_header) :
+# placer l'Ingress derrière oauth2-proxy ou l'authentification du contrôleur.
+ingress:
+  enabled: false
+  className: ""
+  labels: {}                 # OpenShift : labels de sharding du routeur (ex. type: internal)
+  annotations: {}
+  hosts:
+    - host: kansabooj.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # OpenShift : [{}] = TLS avec le certificat par défaut du routeur ; sinon [{ hosts: [...], secretName: ... }]
+  tls: []
+
+# --- Disponibilité et placement -------------------------------------------------------------------------------
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { memory: 512Mi }  # specs volumineuses (plusieurs Mo) : marge pour le diff
+
+# Répartit les réplicas sur des nœuds distincts quand c'est possible.
+topologySpread: true
+topologySpreadConstraints: []  # remplace la contrainte par défaut si renseigné
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+podSecurityContext:
+  runAsNonRoot: true           # pas de runAsUser : OpenShift attribue un UID arbitraire
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+# --- Réseau ----------------------------------------------------------------------------------------------------
+# NetworkPolicy : entrée sur 8080 (routeur / contrôleur Ingress, Prometheus), sortie DNS + règles fournies.
+# Sans règles de sortie supplémentaires, Kansabooj ne joint ni le proxy, ni PostgreSQL, ni les APIs : à compléter.
+networkPolicy:
+  enabled: false
+  ingressFrom: []              # vide = toutes sources ; OpenShift : cf. examples/openshift.yaml
+  egress: []                   # ex. [{ to: [{ ipBlock: { cidr: 10.20.0.10/32 } }], ports: [{ port: 3128, protocol: TCP }] }]

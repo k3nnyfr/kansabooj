@@ -1,0 +1,137 @@
+{{- if not (has .Values.database.mode (list "url" "config")) }}
+{{- fail (printf "database.mode doit valoir « url » ou « config » (reçu : %q)" .Values.database.mode) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" (include "kansabooj.fullname" .) "labels" .Values.deployment.labels "annotations" .Values.deployment.annotations) | nindent 2 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels:
+      {{- include "kansabooj.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kansabooj.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kansabooj.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml .Values.topologySpreadConstraints | nindent 8 }}
+      {{- else if .Values.topologySpread }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "kansabooj.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: kansabooj
+          image: {{ include "kansabooj.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [serve]
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: KANSABOOJ_CONFIG, value: /etc/kansabooj/apis.yml }
+            {{- if eq .Values.database.mode "url" }}
+            - name: KANSABOOJ_DB            # URL PostgreSQL (ex. clé « uri » du Secret CloudNativePG)
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.url.secretName }}
+                  key: {{ .Values.database.url.key }}
+            {{- else }}
+            {{- include "kansabooj.dbPasswordEnv" . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if or .Values.secrets.envFrom .Values.extraEnvFrom }}
+          envFrom:
+            {{- with .Values.secrets.envFrom }}
+            - secretRef:                    # webhooks, clés d'API partenaires… (${VAR} dans apis.yml)
+                name: {{ . }}
+                optional: true
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/kansabooj, readOnly: true }
+            {{- if .Values.secrets.files }}
+            - { name: secret-files, mountPath: /run/secrets/kansabooj, readOnly: true }
+            {{- end }}
+            {{- if and (eq .Values.database.mode "config") .Values.database.config.caSecret }}
+            - { name: db-ca, mountPath: /etc/kansabooj-db, readOnly: true }
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }   # base de données joignable
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }  # processus vivant (ne dépend pas de la base)
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kansabooj.configMapName" . }}
+        {{- with .Values.secrets.files }}
+        - name: secret-files                # certificats mTLS, secrets OAuth2… pour ${file:...}
+          secret: { secretName: {{ . }}, optional: true }
+        {{- end }}
+        {{- if and (eq .Values.database.mode "config") .Values.database.config.caSecret }}
+        - name: db-ca                       # database.sslrootcert: /etc/kansabooj-db/ca.pem
+          secret: { secretName: {{ .Values.database.config.caSecret }}, optional: true }
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

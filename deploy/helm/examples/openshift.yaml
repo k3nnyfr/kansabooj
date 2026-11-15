@@ -1,0 +1,46 @@
+# OpenShift : exposition par un Ingress standard, converti en Route par le contrôleur Ingress-to-route.
+#   helm upgrade --install kansabooj deploy/helm/kansabooj -n kansabooj -f deploy/helm/examples/openshift.yaml
+# Le routeur OpenShift est un HAProxy : ses réglages passent par les annotations haproxy.router.openshift.io/*,
+# recopiées sur la Route générée (de même que route.openshift.io/termination).
+
+commonLabels:
+  team: api-gateway
+commonAnnotations:
+  owner: equipe-api-gateway@example.com
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: /metrics
+
+ingress:
+  enabled: true
+  className: openshift-default            # IngressClass du contrôleur Ingress-to-route
+  labels:
+    type: internal                        # sharding : sélectionne le routeur interne (routeSelector)
+  annotations:
+    route.openshift.io/termination: edge  # edge | reencrypt | passthrough
+    haproxy.router.openshift.io/timeout: 60s
+    haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains
+    # Restriction d'accès par IP source (ip_allowlist depuis OpenShift 4.14, ip_whitelist avant) :
+    # haproxy.router.openshift.io/ip_allowlist: 10.0.0.0/8 192.168.0.0/16
+  hosts:
+    - host: kansabooj.apps.example.com
+  tls:
+    - {}                                  # certificat par défaut du routeur (wildcard *.apps)
+    # ou un certificat dédié : - { hosts: [kansabooj.interne.example.com], secretName: kansabooj-tls }
+
+# Entrée depuis le routeur et la supervision de la plateforme ; sortie à compléter (proxy, PostgreSQL, APIs internes).
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels: { policy-group.network.openshift.io/ingress: "" }
+    - namespaceSelector:
+        matchLabels: { network.openshift.io/policy-group: monitoring }
+  egress:
+    - to: [{ ipBlock: { cidr: 10.20.0.10/32 } }]   # proxy sortant d'entreprise (specs partenaires, webhooks)
+      ports: [{ port: 3128, protocol: TCP }]
+    - to:                                          # PostgreSQL CloudNativePG du même namespace
+        - podSelector: { matchLabels: { cnpg.io/cluster: kansabooj-db } }
+      ports: [{ port: 5432, protocol: TCP }]

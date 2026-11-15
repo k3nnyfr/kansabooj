@@ -1,0 +1,11 @@
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" (include "kansabooj.fullname" .)) | nindent 2 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "kansabooj.selectorLabels" . | nindent 6 }}
+{{- end }}

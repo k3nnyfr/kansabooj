@@ -170,7 +170,8 @@ Cible principale : OpenShift / Kubernetes, avec **le moins d'adhérence possible
 - **Plusieurs réplicas** : un seul *leader* (verrou consultatif PostgreSQL) planifie les checks ; les autres servent
   l'interface et l'API. Bascule automatique si le leader disparaît (perte de session = perte du verrou).
 - Sondes : `/healthz` (liveness, processus) et `/readyz` (readiness, base joignable).
-- Manifests kustomize dans `deploy/kubernetes` (overlays `kubernetes` → Ingress, `openshift` → Route),
+- Manifests kustomize dans `deploy/kubernetes` (overlays `kubernetes` → Ingress, `openshift` → Route) et chart Helm
+  équivalent dans `deploy/helm` (Ingress seul, converti en Route par Ingress-to-route sur OpenShift ; ADR 0005),
   exemple de base CloudNativePG, `deploy/compose.yaml` pour un essai local, `deploy/compose/` pour un déploiement
   Docker Compose sur un serveur unique (image publiée, `kansabooj healthcheck` comme sonde, l'image n'ayant pas de curl).
 

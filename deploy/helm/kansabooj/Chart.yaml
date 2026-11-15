@@ -1,0 +1,14 @@
+apiVersion: v2
+name: kansabooj
+description: Surveillance des contrats d'API partenaires (OpenAPI, Swagger, Redoc) — Kubernetes et OpenShift
+type: application
+# Version du chart = version de l'application (même dépôt, même cycle de release).
+version: 0.11.0
+appVersion: "v0.11.0"
+kubeVersion: ">=1.23.0-0"
+home: https://git.k3nny.fr/k3nny/kansabooj
+sources:
+  - https://git.k3nny.fr/k3nny/kansabooj
+  - https://github.com/k3nnyfr/kansabooj
+keywords: [openapi, swagger, api-monitoring, breaking-changes, api-gateway, openshift]
+icon: https://git.k3nny.fr/k3nny/kansabooj/raw/branch/main/docs/images/logo.svg

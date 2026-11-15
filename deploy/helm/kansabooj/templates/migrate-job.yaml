@@ -1,0 +1,80 @@
+{{- if .Values.database.migrateJob.enabled }}
+{{- if ne .Values.database.mode "config" }}
+{{- fail "database.migrateJob n'est utilisable qu'avec database.mode: config (base décrite dans apis.yml)" }}
+{{- end }}
+{{- $name := printf "%s-migrate" (include "kansabooj.fullname" .) }}
+{{- $hook := dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded" }}
+{{- if not .Values.config.existingConfigMap }}
+# Les hooks pre-install passent avant le ConfigMap de la release : le Job lit une copie de la configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" $name "annotations" (merge (dict "helm.sh/hook-weight" "-5") $hook)) | nindent 2 }}
+data:
+  apis.yml: |
+    {{- .Values.config.apisYml | nindent 4 }}
+---
+{{- end }}
+# Migration du schéma par le compte propriétaire (database.migrate: false côté application), avant chaque
+# installation ou mise à jour. Le schéma, le TLS et le pool viennent de apis.yml ; seule l'identité change.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" $name "annotations" (merge (dict "helm.sh/hook-weight" "0") $hook .Values.database.migrateJob.annotations)) | nindent 2 }}
+spec:
+  backoffLimit: {{ .Values.database.migrateJob.backoffLimit }}
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:                               # hors du sélecteur du Service, du PDB et de la NetworkPolicy
+        app.kubernetes.io/name: {{ include "kansabooj.name" . }}-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: migrate
+        app.kubernetes.io/part-of: kansabooj
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "kansabooj.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [migrate]
+          env:
+            - { name: KANSABOOJ_CONFIG, value: /etc/kansabooj/apis.yml }
+            - name: KANSABOOJ_DB            # URL du compte propriétaire (DDL)
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.migrateJob.ownerUrlSecret.name }}
+                  key: {{ .Values.database.migrateJob.ownerUrlSecret.key }}
+            {{- include "kansabooj.dbPasswordEnv" . | nindent 12 }}
+          {{- with .Values.secrets.envFrom }}
+          envFrom:
+            - secretRef: { name: {{ . }}, optional: true }   # variables ${VAR} requises par la validation
+          {{- end }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/kansabooj, readOnly: true }
+            {{- if .Values.database.config.caSecret }}
+            - { name: db-ca, mountPath: /etc/kansabooj-db, readOnly: true }
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.database.migrateJob.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ default $name .Values.config.existingConfigMap }}
+        {{- with .Values.database.config.caSecret }}
+        - name: db-ca
+          secret: { secretName: {{ . }}, optional: true }
+        {{- end }}
+{{- end }}

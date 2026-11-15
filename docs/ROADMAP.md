@@ -88,8 +88,13 @@
 - [x] `ignore:` accepte `$..clé` (toute profondeur), ex. `$..example`
 - [x] v0.10.1 : liens vers le dépôt principal (Gitea) et son miroir GitHub dans la barre du haut, logo dans le README
 
+## v0.11 — Chart Helm ✅ 2026-11-15
+- [x] Chart `deploy/helm/kansabooj`, équivalent des manifests kustomize : Ingress standard (Route générée par
+      Ingress-to-route sur OpenShift, contrôleur HAProxy sur Kubernetes), labels et annotations communs et par
+      ressource, ConfigMap géré ou existant, base par URL ou section `database:`, migration en hook `pre-upgrade`,
+      NetworkPolicy optionnelle ; exemples OpenShift / HAProxy / base tierce, rendu vérifié en CI (ADR 0005)
+
 ## Plus tard (selon retours)
-- Chart Helm (si les équipes d'exploitation le préfèrent à kustomize)
 - CLI et messages d'erreur détaillés bilingues (aujourd'hui en français ; le front traduit déjà les catégories d'erreur)
 - `gateway.published_spec` : périmètre déduit du contrat publié + détection de drift amont ↔ publié (agnostique de la Gateway)
 - Autres formats : AsyncAPI, GraphQL SDL, WSDL (interface `Differ` par format)

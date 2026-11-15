@@ -1,0 +1,10 @@
+{{- if not .Values.config.existingConfigMap }}
+# Nom stable (pas de hash) : Kansabooj détecte la mise à jour du fichier monté et se recharge à chaud.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" (include "kansabooj.configMapName" .) "labels" .Values.config.labels "annotations" .Values.config.annotations) | nindent 2 }}
+data:
+  apis.yml: |
+    {{- required "config.apisYml ou config.existingConfigMap est requis" .Values.config.apisYml | nindent 4 }}
+{{- end }}

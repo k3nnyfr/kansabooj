@@ -1,0 +1,21 @@
+# Kubernetes avec le contrôleur HAProxy Kubernetes Ingress (haproxytech/kubernetes-ingress, classe « haproxy »).
+#   helm upgrade --install kansabooj deploy/helm/kansabooj -n kansabooj -f deploy/helm/examples/kubernetes-haproxy.yaml
+# Annotations haproxy.org/* : https://www.haproxy.com/documentation/kubernetes-ingress/community/configuration-reference/ingress/
+
+commonLabels:
+  team: api-gateway
+
+ingress:
+  enabled: true
+  className: haproxy
+  annotations:
+    haproxy.org/ssl-redirect: "true"
+    haproxy.org/timeout-server: 60s
+    haproxy.org/hsts: "true"
+    # haproxy.org/allow-list: 10.0.0.0/8, 192.168.0.0/16
+    # cert-manager.io/cluster-issuer: interne         # certificat émis par cert-manager
+  hosts:
+    - host: kansabooj.example.com
+  tls:
+    - hosts: [kansabooj.example.com]
+      secretName: kansabooj-tls

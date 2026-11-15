@@ -1,0 +1,26 @@
+Kansabooj {{ .Chart.AppVersion }} déployé dans {{ .Release.Namespace }} ({{ .Values.replicaCount }} réplica(s), un seul planifie les checks).
+
+{{- if .Values.ingress.enabled }}
+Interface :
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/
+{{- end }}
+{{- if eq .Values.ingress.className "openshift-default" }}
+  Route générée par OpenShift (Ingress-to-route) : oc get route -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+{{- else }}
+Aucun Ingress : kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kansabooj.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+Prérequis à fournir (non créés par le chart) :
+{{- if eq .Values.database.mode "url" }}
+  - Secret {{ .Values.database.url.secretName }} (clé {{ .Values.database.url.key }}) : URL PostgreSQL
+{{- else }}
+  - Secret {{ .Values.database.config.passwordSecret.name }} (clé {{ .Values.database.config.passwordSecret.key }}) : mot de passe du compte applicatif
+{{- end }}
+{{- with .Values.secrets.envFrom }}
+  - Secret {{ . }} (optionnel) : variables ${VAR} référencées dans apis.yml
+{{- end }}
+
+La configuration ({{ include "kansabooj.configMapName" . }}) est rechargée à chaud : un helm upgrade qui ne change
+qu'elle ne redémarre pas les pods.

@@ -1,0 +1,30 @@
+{{- if .Values.ingress.enabled }}
+{{- $svc := include "kansabooj.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  {{- include "kansabooj.metadata" (dict "ctx" $ "name" $svc "labels" .Values.ingress.labels "annotations" .Values.ingress.annotations) | nindent 2 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ required "ingress.hosts[].host est requis" .host | quote }}
+      http:
+        paths:
+          {{- range (default (list (dict "path" "/" "pathType" "Prefix")) .paths) }}
+          - path: {{ .path | default "/" }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

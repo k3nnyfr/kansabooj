@@ -2,7 +2,7 @@
 
 <img src="docs/images/logo.svg" alt="Logo Kansabooj" width="96">
 
-![version](https://img.shields.io/badge/version-v0.10-blue.svg)
+![version](https://img.shields.io/badge/version-v0.11-blue.svg)
 
 > **Dépôt principal : [git.k3nny.fr/k3nny/kansabooj](https://git.k3nny.fr/k3nny/kansabooj).**
 > [github.com/k3nnyfr/kansabooj](https://github.com/k3nnyfr/kansabooj) n'en est qu'un miroir en lecture seule, mis à jour automatiquement : les issues et contributions se font sur le dépôt principal.
@@ -127,6 +127,14 @@ kubectl apply -k deploy/kubernetes/overlays/openshift    # ou overlays/kubernete
 
 Il faut une base PostgreSQL 12 ou plus (exemple CloudNativePG fourni), un Secret pour les webhooks et les identifiants partenaires, et la configuration en ConfigMap, rechargée à chaud quand elle change. Plusieurs réplicas peuvent tourner : un seul planifie les checks. Base gérée par une équipe DBA sur un serveur tiers : overlay `openshift-external-db`, voir [le guide](docs/guides/postgresql-externe.md).
 
+### Helm
+
+```bash
+helm upgrade --install kansabooj deploy/helm/kansabooj -n kansabooj -f deploy/helm/examples/openshift.yaml
+```
+
+Mêmes ressources qu'avec kustomize, exposées par un Ingress standard : sur OpenShift, le contrôleur Ingress-to-route en fait une Route (annotations du routeur HAProxy reprises) ; sur Kubernetes, un contrôleur HAProxy Ingress (exemple fourni). Labels et annotations ajoutables sur chaque ressource, migration du schéma en hook pour une base tierce : [guide Helm](docs/guides/helm.md).
+
 ### Docker Compose
 
 Pour un serveur unique, sans Kubernetes : Kansabooj et PostgreSQL, secrets dans un fichier `.env`, configuration montée et rechargée à chaud.
@@ -165,6 +173,7 @@ Les tests n'appellent jamais le réseau. Conventions et principes du projet : [C
 
 - [Architecture](docs/ARCHITECTURE.md) : besoin, choix techniques, normalisation, découverte, sécurité, marché
 - [Feuille de route](docs/ROADMAP.md) et [décisions d'architecture](docs/adr/)
+- [Helm](docs/guides/helm.md) : chart Kubernetes / OpenShift, Ingress-to-route, HAProxy, métadonnées
 - [Docker Compose](docs/guides/docker-compose.md) : déploiement sur un serveur unique, reverse proxy, mises à jour, sauvegardes
 - [PostgreSQL externe](docs/guides/postgresql-externe.md) : serveur tiers, TLS, comptes et schéma dédiés, migrations séparées
 - [CI](docs/guides/ci.md) : validation des fragments de configuration, contrôle de contrat avant déploiement

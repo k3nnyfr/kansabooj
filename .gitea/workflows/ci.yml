@@ -124,6 +124,30 @@ jobs:
             echo "== $o"
             go run sigs.k8s.io/kustomize/kustomize/v5@v5.5.0 build deploy/kubernetes/overlays/$o > /dev/null
           done
+      - name: chart Helm
+        # Binaire officiel (version épinglée, somme de contrôle vérifiée) : pas d'action tierce.
+        env:
+          HELM_VERSION: v4.2.0
+        run: |
+          case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) echo "::error::architecture $(uname -m)"; exit 1 ;; esac
+          if ! command -v curl >/dev/null; then   # absent des images node:*-slim
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends curl
+          fi
+          tgz="helm-$HELM_VERSION-linux-$arch.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "https://get.helm.sh/$tgz" && curl -fsSLO "https://get.helm.sh/$tgz.sha256sum"
+          sha256sum -c "$tgz.sha256sum"
+          tar -xzf "$tgz" "linux-$arch/helm" && install "linux-$arch/helm" /usr/local/bin/helm 2>/dev/null \
+            || { mkdir -p "$RUNNER_TEMP/bin" && mv "linux-$arch/helm" "$RUNNER_TEMP/bin/" && echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"; }
+      - name: rendu Helm
+        run: |
+          helm lint --strict deploy/helm/kansabooj
+          for f in deploy/helm/examples/*.yaml; do
+            echo "== $f"
+            helm lint --strict deploy/helm/kansabooj -f "$f" > /dev/null
+            helm template kansabooj deploy/helm/kansabooj -f "$f" > /dev/null
+          done
 
   # Construit, scanne et publie l'image avec le démon Docker de l'hôte (act_runner monte /var/run/docker.sock).
   # Sans action tierce : client Docker de Debian + Trivy en conteneur (version et empreinte épinglées).

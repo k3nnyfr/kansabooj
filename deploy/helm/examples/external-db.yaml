@@ -1,0 +1,32 @@
+# PostgreSQL sur un serveur tiers (guide docs/guides/postgresql-externe.md) : section database: de apis.yml,
+# compte applicatif sans droits DDL, migration par le compte propriétaire en hook Helm avant chaque mise à jour.
+# À combiner avec un exemple d'exposition : -f examples/openshift.yaml -f examples/external-db.yaml
+
+database:
+  mode: config
+  config:
+    passwordSecret: { name: kansabooj-db-credentials, key: password }
+    caSecret: kansabooj-db-ca
+  migrateJob:
+    enabled: true
+    ownerUrlSecret: { name: kansabooj-db-owner, key: uri }
+
+config:
+  apisYml: |
+    server:
+      base_url: https://kansabooj.apps.example.com
+    database:
+      host: pg.interne.example.com
+      name: plateforme
+      schema: kansabooj
+      user: kansabooj_app
+      password: ${KANSABOOJ_DB_PASSWORD}
+      sslmode: verify-full
+      sslrootcert: /etc/kansabooj-db/ca.pem
+      migrate: false
+    apis:
+      - id: petstore
+        name: Swagger Petstore
+        source:
+          url: https://petstore3.swagger.io/api/v3/openapi.json
+          type: openapi

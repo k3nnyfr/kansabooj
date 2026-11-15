@@ -53,12 +53,14 @@ config/apis.fragment.schema.json  schéma des fragments d'équipe (apis.d/*.yml 
 config/apis.example.yml exemple exhaustif (toutes les options, secrets fictifs : ne s'exécute pas tel quel)
 config/apis.demo.yml    config exécutable sans secret (Worldline préprod + Petstore), défaut du Taskfile
 deploy/kubernetes/      base + overlays kubernetes (Ingress) / openshift (Route), exemple CloudNativePG
+deploy/helm/kansabooj/  chart Helm équivalent (Ingress seul : Ingress-to-route sur OpenShift, HAProxy sur Kubernetes) ;
+                        examples/ : valeurs OpenShift, HAProxy, base tierce — à garder aligné avec deploy/kubernetes (ADR 0005)
 deploy/compose.yaml     essai local avec PostgreSQL (build depuis les sources)
 deploy/compose/         déploiement Docker Compose (image publiée, .env, config montée) — docs/guides/docker-compose.md
 .gitea/workflows/ci.yml CI Gitea Actions (rejouable localement : task ci [PG=postgres://…])
 scripts/check-schemas.py  validation JSON Schema des configs du dépôt
 scripts/screenshots.sh  captures du README (docs/images) sur les APIs fictives de scripts/screenshots/ (task screenshots)
-docs/guides/            docker-compose, postgresql-externe, ci, exploitation (métriques, alertes)
+docs/guides/            docker-compose, helm, postgresql-externe, ci, exploitation (métriques, alertes)
 deploy/                 Dockerfile, compose, manifests
 docs/                   ARCHITECTURE.md, ROADMAP.md, adr/
 ```
@@ -79,6 +81,7 @@ task lint                            # gofmt, go vet, tsc
 task build                           # front embarqué + binaire bin/kansabooj (version = git describe)
 task image                           # image de conteneur (podman ou docker)
 task deploy:render TARGET=openshift  # manifests kustomize générés (aussi : openshift-external-db)
+task helm:lint                       # lint du chart + rendu de chaque exemple (helm:render VALUES=… pour afficher)
 task migrate                         # migrations seules (compte DDL ; cf. database.migrate: false)
 task screenshots                     # régénère docs/images après un changement visible de l'interface
 ```

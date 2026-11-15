@@ -117,6 +117,19 @@ tasks:
     vars: { TARGET: '{{.TARGET | default "kubernetes"}}' }
     cmds: ['kubectl kustomize deploy/kubernetes/overlays/{{.TARGET}}']
 
+  helm:lint:
+    desc: "Lint du chart Helm et rendu de chaque exemple (deploy/helm/examples)"
+    cmds:
+      - helm lint --strict deploy/helm/kansabooj
+      - for: { var: HELM_EXAMPLES }
+        cmd: helm lint --strict deploy/helm/kansabooj -f {{.ITEM}} > /dev/null && helm template kansabooj deploy/helm/kansabooj -f {{.ITEM}} > /dev/null && echo "helm {{.ITEM}} ok"
+    vars:
+      HELM_EXAMPLES: { sh: ls deploy/helm/examples/*.yaml }
+
+  helm:render:
+    desc: "Affiche les manifests du chart — ex : task helm:render VALUES=deploy/helm/examples/openshift.yaml"
+    cmds: ['helm template kansabooj deploy/helm/kansabooj {{if .VALUES}}-f {{.VALUES}}{{end}}']
+
   lint:
     desc: gofmt, go vet et typecheck du front
     cmds:
@@ -149,6 +162,7 @@ tasks:
       - task: ui:build
       - for: [kubernetes, openshift, openshift-external-db]
         cmd: kubectl kustomize deploy/kubernetes/overlays/{{.ITEM}} > /dev/null && echo "kustomize {{.ITEM}} ok"
+      - task: helm:lint
 
   clean:
     desc: Supprime binaires, base locale et builds
