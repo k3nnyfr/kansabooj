@@ -2,9 +2,12 @@
 
 ![version](https://img.shields.io/badge/version-v0.10-blue.svg)
 
+> **Dépôt principal : [git.k3nny.fr/k3nny/kansabooj](https://git.k3nny.fr/k3nny/kansabooj).**
+> [github.com/k3nnyfr/kansabooj](https://github.com/k3nnyfr/kansabooj) n'en est qu'un miroir en lecture seule, mis à jour automatiquement : les issues et contributions se font sur le dépôt principal.
+
 Kansabooj (« quand ça bouge ») surveille les **contrats d'API** dont dépend votre API Gateway : APIs de partenaires réexposées en interne, ou APIs internes entre équipes. Il relit régulièrement chaque contrat (OpenAPI, Swagger, page Swagger-UI ou Redoc, et même une simple page HTML), détecte ce qui a changé, signale ce qui casse dans le périmètre que vous réexposez, garde l'historique et prévient les équipes sur Google Chat, Slack, Teams ou un webhook.
 
-**[Démo en ligne](https://kansabooj.k3nny.fr/)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Dépôt](https://git.k3nny.fr/k3nny/kansabooj)** · **[Feuille de route](docs/ROADMAP.md)** · **[Décisions (ADR)](docs/adr/)** · **[API REST](backend/internal/httpapi/openapi.yaml)** · Licence [MIT](LICENSE)
+**[Démo en ligne](https://kansabooj.k3nny.fr/)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Dépôt](https://git.k3nny.fr/k3nny/kansabooj)** ([miroir GitHub](https://github.com/k3nnyfr/kansabooj)) · **[Feuille de route](docs/ROADMAP.md)** · **[Décisions (ADR)](docs/adr/)** · **[API REST](backend/internal/httpapi/openapi.yaml)** · Licence [MIT](LICENSE)
 
 ![Liste des APIs surveillées : état, version, dernier check, changements en attente, filtres par état, groupes et tags, colonnes triables](docs/images/apis.png)
 
